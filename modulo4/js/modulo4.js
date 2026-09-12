@@ -322,87 +322,172 @@ function siguienteCorrelativo(){
   document.getElementById('correlativo').textContent = pad(siguiente);
 }
 
-/* =========================
-   BUSQUEDA DNI + NOMBRE AUTOMATICO
-   ========================= */
+// =====================================================
+// CONSULTA DNI - SUPABASE EDGE FUNCTION
+// =====================================================
 
-/*
-   API de consulta DNI.
-   Pega aquí tu token de consulta de DNI (no el de Supabase).
-   La API usada es apis.net.pe / RENIEC.
-*/
-const DNI_API_TOKEN = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6IjE5bGlzbWFuQGdtYWlsLmNvbSIsImp0aSI6ImYwNjU0NTIwMTYwMjg2YTAifQ.eDOx15S2NN9hCPIu-qo-PqPgiS9xUqIfrkuN4SdlFHY';
-const DNI_API_URL = 'https://api.apis.net.pe/v2/reniec/dni?numero=';
+async function consultarDNI(dni) {
 
-const dniInput = document.getElementById('dni');
-const clienteInput = document.getElementById('cliente');
-let dniTimer = null;
-
-async function consultarDNI(dni){
   const msg = document.getElementById('dniMsg');
 
-  if(!DNI_API_TOKEN || DNI_API_TOKEN === 'PEGA_AQUI_TU_TOKEN_DNI'){
-    msg.innerHTML = '<div class="hint">DNI válido. Para colocar el nombre automáticamente falta configurar el token de consulta DNI.</div>';
-    return;
-  }
+  // Mostrar estado de consulta
+  msg.innerHTML =
+    '<div class="hint">Consultando DNI...</div>';
 
-  msg.innerHTML = '<div class="hint">Consultando DNI...</div>';
+  try {
 
-  try{
-    const response = await fetch(DNI_API_URL + encodeURIComponent(dni), {
-      method:'GET',
-      headers:{
-        'Authorization':'Bearer ' + DNI_API_TOKEN,
-        'Accept':'application/json'
-      }
-    });
-
-    const data = await response.json().catch(()=>({}));
-
-    if(!response.ok){
-      throw new Error(data.message || data.error || ('HTTP '+response.status));
+    // Verificar que tenga exactamente 8 dígitos
+    if (!/^\d{8}$/.test(dni)) {
+      throw new Error('El DNI debe tener exactamente 8 dígitos.');
     }
 
+    // Consultar la Edge Function de Supabase
+    const { data, error } =
+      await supabase.functions.invoke(
+        'consultar-dni',
+        {
+          body: {
+            dni: dni
+          }
+        }
+      );
+
+    // Error de Supabase
+    if (error) {
+      console.error(
+        'Error de Supabase:',
+        error
+      );
+
+      throw new Error(
+        error.message ||
+        'No se pudo conectar con la consulta DNI.'
+      );
+    }
+
+    console.log(
+      'Respuesta DNI:',
+      data
+    );
+
+    // Error enviado por nuestra Edge Function
+    if (!data) {
+      throw new Error(
+        'La consulta no devolvió información.'
+      );
+    }
+
+    if (data.success === false) {
+      throw new Error(
+        data.message ||
+        'No se pudo consultar el DNI.'
+      );
+    }
+
+    // Obtener nombre dependiendo de cómo responda la API
     const nombre = (
+      data.nombre ||
       data.nombre_completo ||
-      [data.nombres, data.apellido_paterno, data.apellido_materno]
-        .filter(Boolean).join(' ')
+      data.nombreCompleto ||
+      [
+        data.nombres,
+        data.apellido_paterno,
+        data.apellido_materno
+      ]
+        .filter(Boolean)
+        .join(' ')
     ).trim();
 
-    if(!nombre){
-      throw new Error('La API no devolvió el nombre para este DNI.');
+    // Si no encontramos nombre
+    if (!nombre) {
+      throw new Error(
+        'La API no devolvió el nombre para este DNI.'
+      );
     }
 
-    clienteInput.value = nombre.toUpperCase();
-    msg.innerHTML = '<div class="ok">✓ Cliente encontrado: '+esc(nombre)+'</div>';
-  }catch(error){
-    console.error('Error consultando DNI:', error);
-    msg.innerHTML = '<div class="hint">No se pudo consultar el DNI: '+esc(error.message||'Error de consulta')+'. Puedes escribir el nombre manualmente.</div>';
+    // Colocar nombre en el campo CLIENTE
+    clienteInput.value =
+      nombre.toUpperCase();
+
+    // Mensaje correcto
+    msg.innerHTML =
+      '<div class="ok">' +
+      '✓ Cliente encontrado: ' +
+      esc(nombre) +
+      '</div>';
+
+  } catch (error) {
+
+    console.error(
+      'Error consultando DNI:',
+      error
+    );
+
+    msg.innerHTML =
+      '<div class="hint">' +
+      'No se pudo consultar el DNI: ' +
+      esc(
+        error.message ||
+        'Error de consulta'
+      ) +
+      '. Puedes escribir el nombre manualmente.' +
+      '</div>';
   }
 }
 
-dniInput.addEventListener('input', function(){
-  let v = this.value.replace(/\D/g,'').slice(0,8);
-  this.value = v;
 
-  const msg = document.getElementById('dniMsg');
-  msg.innerHTML = '';
+// =====================================================
+// DETECTAR DNI ESCRITO
+// =====================================================
 
-  clearTimeout(dniTimer);
+dniInput.addEventListener(
+  'input',
+  function () {
 
-  if(v.length === 0){
-    clienteInput.value = '';
-    return;
+    // Solo números y máximo 8
+    let v = this.value
+      .replace(/\D/g, '')
+      .slice(0, 8);
+
+    this.value = v;
+
+    const msg =
+      document.getElementById('dniMsg');
+
+    msg.innerHTML = '';
+
+    clearTimeout(dniTimer);
+
+    // DNI vacío
+    if (v.length === 0) {
+
+      clienteInput.value = '';
+
+      return;
+    }
+
+    // DNI incompleto
+    if (v.length < 8) {
+
+      msg.innerHTML =
+        '<div class="hint">' +
+        'Faltan ' +
+        (8 - v.length) +
+        ' dígitos.' +
+        '</div>';
+
+      return;
+    }
+
+    // DNI completo
+    dniTimer = setTimeout(
+      function () {
+        consultarDNI(v);
+      },
+      250
+    );
   }
-
-  if(v.length < 8){
-    msg.innerHTML = '<div class="hint">Faltan '+(8-v.length)+' dígitos.</div>';
-    return;
-  }
-
-  dniTimer = setTimeout(()=>consultarDNI(v), 250);
-});
-
+);
 /* =========================
    NUMERO DUPLICADO
    ========================= */
