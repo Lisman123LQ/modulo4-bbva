@@ -654,3 +654,20 @@
     font-weight:700;color:var(--navy);
   }
 
+
+/* =========================
+   UBICACIÓN EN MAPA
+   ========================= */
+.location-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.location-actions .btn{flex:1;min-width:170px}
+.location-coords{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.location-coords label{display:block;font-size:12px;margin-bottom:5px}
+.location-coords input{width:100%;box-sizing:border-box}
+.map-picker-bg{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:none;align-items:center;justify-content:center;padding:12px}
+.map-picker-bg.show{display:flex}
+.map-picker{background:#fff;width:min(900px,100%);height:min(720px,92vh);border-radius:16px;padding:12px;box-sizing:border-box;display:flex;flex-direction:column;gap:10px}
+.map-picker h3{margin:0}
+#locationMap{width:100%;flex:1;min-height:350px;border-radius:12px}
+.map-picker-actions{display:flex;gap:8px}
+.map-picker-actions button{flex:1}
+@media(max-width:600px){.location-coords{grid-template-columns:1fr}.map-picker{height:90vh}}

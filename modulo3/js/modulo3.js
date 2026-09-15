@@ -40,6 +40,10 @@ let currentUser = null;
 let currentProfile = null;
 let perfiles = {};
 let guardando = false;
+let editandoId = null;
+let mapa = null;
+let marcadorMapa = null;
+let ubicacionTemporal = { lat: null, lng: null };
 
 
 /* =========================
@@ -1300,6 +1304,105 @@ setupPhotoBox(
 
 
 /* =========================
+   SELECTOR DE UBICACIÓN MANUAL
+   ========================= */
+function abrirMapa(){
+  const bg=document.getElementById('mapPickerBg');
+  if(!bg || typeof L==='undefined'){
+    alert('No se pudo cargar el mapa. Verifica tu conexión a Internet.');
+    return;
+  }
+  const lat=Number(document.getElementById('latitud')?.value);
+  const lng=Number(document.getElementById('longitud')?.value);
+  ubicacionTemporal={
+    lat:Number.isFinite(lat)?lat:-12.046374,
+    lng:Number.isFinite(lng)?lng:-77.042793
+  };
+  bg.classList.add('show');
+  setTimeout(()=>{
+    if(!mapa){
+      mapa=L.map('locationMap').setView([ubicacionTemporal.lat,ubicacionTemporal.lng],13);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+        maxZoom:19,
+        attribution:'&copy; OpenStreetMap'
+      }).addTo(mapa);
+      mapa.on('click',e=>seleccionarPunto(e.latlng.lat,e.latlng.lng));
+    }else{
+      mapa.invalidateSize();
+      mapa.setView([ubicacionTemporal.lat,ubicacionTemporal.lng],13);
+    }
+    seleccionarPunto(ubicacionTemporal.lat,ubicacionTemporal.lng);
+  },100);
+}
+function seleccionarPunto(lat,lng){
+  ubicacionTemporal={lat:Number(lat),lng:Number(lng)};
+  if(marcadorMapa) marcadorMapa.setLatLng([lat,lng]);
+  else if(mapa) marcadorMapa=L.marker([lat,lng]).addTo(mapa);
+  const el=document.getElementById('mapCoords');
+  if(el) el.textContent='Latitud: '+Number(lat).toFixed(6)+' · Longitud: '+Number(lng).toFixed(6);
+}
+function confirmarUbicacion(){
+  if(ubicacionTemporal.lat===null || ubicacionTemporal.lng===null){return;}
+  const lat=document.getElementById('latitud'),lng=document.getElementById('longitud');
+  if(lat) lat.value=ubicacionTemporal.lat.toFixed(6);
+  if(lng) lng.value=ubicacionTemporal.lng.toFixed(6);
+  cerrarMapa();
+}
+function cerrarMapa(){document.getElementById('mapPickerBg')?.classList.remove('show');}
+function limpiarUbicacion(){
+  const lat=document.getElementById('latitud'),lng=document.getElementById('longitud');
+  if(lat) lat.value='';
+  if(lng) lng.value='';
+  ubicacionTemporal={lat:null,lng:null};
+}
+function obtenerUbicacionRegistro(r){
+  return {lat:r?.latitud??null,lng:r?.longitud??null};
+}
+
+/* =========================
+   EDITAR REGISTRO
+   ========================= */
+function editarRegistro(id){
+  const r=registros.find(x=>String(x.id)===String(id));
+  if(!r) return;
+  editandoId=r.id;
+  document.getElementById('dni').value=r.dni||'';
+  document.getElementById('cliente').value=r.cliente||'';
+  document.getElementById('numero').value=r.numero||'';
+  document.getElementById('latitud').value=r.latitud??'';
+  document.getElementById('longitud').value=r.longitud??'';
+  const btn=document.querySelector('[onclick="guardarRegistro()"]');
+  if(btn) btn.innerHTML='💾 Guardar<br>cambios';
+  const title=document.querySelector('.section-title');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+async function actualizarRegistro(){
+  if(!editandoId || !currentUser) return false;
+  const dni=document.getElementById('dni')?.value.trim()||'';
+  const cliente=document.getElementById('cliente')?.value.trim()||'';
+  const numero=document.getElementById('numero')?.value.trim()||'';
+  const lat=document.getElementById('latitud')?.value.trim()||null;
+  const lng=document.getElementById('longitud')?.value.trim()||null;
+  if(dni.length!==8){alert('El DNI debe tener 8 dígitos.');return false;}
+  if(!numero){alert('Ingresa el número.');return false;}
+  const dup=registros.some(r=>String(r.id)!==String(editandoId) && (String(r.dni||'').trim()===dni || String(r.numero||'').trim()===numero));
+  if(dup){alert('El DNI o número ya pertenece a otro registro.');return false;}
+  const {error}=await supabaseClient.from('bbva_registros').update({
+    dni,cliente:cliente||null,numero,
+    latitud:lat!==null?Number(lat):null,
+    longitud:lng!==null?Number(lng):null
+  }).eq('id',editandoId);
+  if(error){alert('❌ No se pudo actualizar: '+error.message);return false;}
+  alert('✅ Registro actualizado correctamente.');
+  editandoId=null;
+  const btn=document.querySelector('[onclick="guardarRegistro()"]');
+  if(btn) btn.innerHTML='💾 Guardar<br>registro';
+  await cargarRegistros();
+  limpiarCampos();
+  return true;
+}
+
+/* =========================
    LIMPIAR
    ========================= */
 
@@ -1502,6 +1605,8 @@ async function subirFoto(
    ========================= */
 
 async function guardarRegistro(){
+
+  if(editandoId) return actualizarRegistro();
 
   if(guardando){
     return false;
@@ -2208,7 +2313,7 @@ function renderLista(){
                   ${esc(r.dni)}
 
                   · Número
-                  ${esc(r.numero)}
+                  ${esc(r.numero)}${(r.latitud!=null&&r.longitud!=null)?` · 📍 ${Number(r.latitud).toFixed(6)}, ${Number(r.longitud).toFixed(6)}`:''}
 
                 </div>
 
@@ -2293,6 +2398,7 @@ function renderLista(){
             </div>
 
 
+            <button type="button" class="btn btn-blue" onclick="editarRegistro('${r.id}')">✏️ Editar</button>
             <button
               class="del"
               onclick="eliminarRegistro('${r.id}')">

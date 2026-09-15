@@ -59,3 +59,12 @@ USING (user_id = auth.uid() OR public.is_admin());
 
 -- La papelera usa borrado lógico (eliminado=true).
 -- No se elimina físicamente el registro, por eso puede restaurarse online.
+
+
+-- UBICACIÓN MANUAL EN MAPA
+ALTER TABLE public.bbva_registros
+  ADD COLUMN IF NOT EXISTS latitud double precision,
+  ADD COLUMN IF NOT EXISTS longitud double precision;
+
+CREATE INDEX IF NOT EXISTS idx_bbva_registros_ubicacion
+ON public.bbva_registros (latitud, longitud);

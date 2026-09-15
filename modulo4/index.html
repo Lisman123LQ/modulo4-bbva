@@ -9,6 +9,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <link rel="stylesheet" href="css/estilos.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIINfQ3e4d7Y9yQ8n4fG6gX6xY9J9Q0w9sM=" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 </head>
 
 <body class="locked">
@@ -166,6 +168,20 @@
 
   </div>
 
+
+  <!-- UBICACIÓN MANUAL EN MAPA -->
+  <div class="card">
+    <label style="margin-bottom:12px;">📍 UBICACIÓN DEL REGISTRO <span class="opt">(seleccionada manualmente)</span></label>
+    <div class="location-actions">
+      <button type="button" class="btn btn-blue" onclick="abrirMapa()">🗺️ Seleccionar ubicación en mapa</button>
+      <button type="button" class="btn btn-outline" onclick="limpiarUbicacion()">✕ Quitar ubicación</button>
+    </div>
+    <div class="location-coords">
+      <div><label>Latitud</label><input type="number" id="latitud" step="any" placeholder="-12.046374"></div>
+      <div><label>Longitud</label><input type="number" id="longitud" step="any" placeholder="-77.042793"></div>
+    </div>
+    <div class="hint">Puedes elegir cualquier punto del mapa. No se usa el GPS de tu dispositivo.</div>
+  </div>
 
   <!-- FOTOS -->
 
@@ -438,6 +454,20 @@
 
 </footer>
 
+
+<!-- SELECTOR DE UBICACIÓN -->
+<div class="map-picker-bg" id="mapPickerBg">
+  <div class="map-picker">
+    <h3>🗺️ Seleccionar ubicación</h3>
+    <div class="hint">Haz clic en cualquier punto del mapa para colocar una ubicación manual.</div>
+    <div id="locationMap"></div>
+    <div id="mapCoords" class="hint">Latitud: — · Longitud: —</div>
+    <div class="map-picker-actions">
+      <button type="button" class="btn btn-outline" onclick="cerrarMapa()">Cancelar</button>
+      <button type="button" class="btn btn-green" onclick="confirmarUbicacion()">✓ Usar esta ubicación</button>
+    </div>
+  </div>
+</div>
 
 <!-- MODAL -->
 
