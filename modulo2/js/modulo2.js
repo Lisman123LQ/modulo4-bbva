@@ -30,7 +30,7 @@ const supabaseClient = window.supabase.createClient(
 );
 
 let registros = [];
-let fotos = { qr:null, antes:null, despues:null };
+let fotos = { qr:null, antes:null, despues:null, pago:null };
 let currentUser = null;
 let currentProfile = null;
 let perfiles = {};
@@ -276,6 +276,7 @@ async function prepararUrlsFotos(){
     if(r.qr_path) paths.push(r.qr_path);
     if(r.antes_path) paths.push(r.antes_path);
     if(r.despues_path) paths.push(r.despues_path);
+    if(r.pago_path) paths.push(r.pago_path);
   });
 
   const unique=[...new Set(paths)];
@@ -300,6 +301,7 @@ async function prepararUrlsFotos(){
     r.qr_url=urlMap[r.qr_path]||'';
     r.antes_url=urlMap[r.antes_path]||'';
     r.despues_url=urlMap[r.despues_path]||'';
+    r.pago_url=urlMap[r.pago_path]||'';
   });
 }
 
@@ -489,7 +491,8 @@ function rebuildPhotoBox(key,boxId){
   const labels={
     qr:['FOTO QR<br>PLIN','Obligatoria'],
     antes:['FOTO<br>ANTES','Opcional'],
-    despues:['FOTO<br>DESPUÉS','Opcional']
+    despues:['FOTO<br>DESPUÉS','Opcional'],
+    pago:['CAPTURA<br>DE PAGO','Opcional']
   };
 
   const [lbl,tag]=labels[key];
@@ -514,6 +517,7 @@ function rebuildPhotoBox(key,boxId){
 setupPhotoBox('qr','box-qr','file-qr');
 setupPhotoBox('antes','box-antes','file-antes');
 setupPhotoBox('despues','box-despues','file-despues');
+setupPhotoBox('pago','box-pago','file-pago');
 
 /* =========================
    SELECTOR DE UBICACIÓN MANUAL
@@ -599,11 +603,22 @@ async function actualizarRegistro(){
   if(!numero){alert('Ingresa el número.');return false;}
   const dup=registros.some(r=>String(r.id)!==String(editandoId) && (String(r.dni||'').trim()===dni || String(r.numero||'').trim()===numero));
   if(dup){alert('El DNI o número ya pertenece a otro registro.');return false;}
-  const {error}=await supabaseClient.from('bbva_registros').update({
+  let nuevoPagoPath = null;
+  try{
+    if(fotos.pago){
+      nuevoPagoPath = await subirFoto(fotos.pago.blob,'pago');
+    }
+  }catch(error){
+    alert('❌ No se pudo subir la captura de pago: '+error.message);
+    return false;
+  }
+  const cambios = {
     dni,cliente:cliente||null,numero,
     latitud:lat!==null?Number(lat):null,
     longitud:lng!==null?Number(lng):null
-  }).eq('id',editandoId);
+  };
+  if(nuevoPagoPath) cambios.pago_path=nuevoPagoPath;
+  const {error}=await supabaseClient.from('bbva_registros').update(cambios).eq('id',editandoId);
   if(error){alert('❌ No se pudo actualizar: '+error.message);return false;}
   alert('✅ Registro actualizado correctamente.');
   editandoId=null;
@@ -626,7 +641,7 @@ function limpiarCampos(){
   document.getElementById('dniMsg').innerHTML='';
   document.getElementById('numeroMsg').innerHTML='';
 
-  fotos={qr:null,antes:null,despues:null};
+  fotos={qr:null,antes:null,despues:null,pago:null};
 
   rebuildPhotoBox('qr','box-qr');
   rebuildPhotoBox('antes','box-antes');
@@ -642,7 +657,7 @@ async function agregarNuevo(){
   const cliente=document.getElementById('cliente').value.trim();
   const numero=document.getElementById('numero').value.trim();
 
-  if(dni || cliente || numero || fotos.qr || fotos.antes || fotos.despues){
+  if(dni || cliente || numero || fotos.qr || fotos.antes || fotos.despues || fotos.pago){
     const ok=await guardarRegistro();
     if(!ok) return;
   }
@@ -736,6 +751,7 @@ async function guardarRegistro(){
 
     let antes_path=null;
     let despues_path=null;
+    let pago_path=null;
 
     if(fotos.antes){
       antes_path=await subirFoto(fotos.antes.blob,'antes');
@@ -745,6 +761,11 @@ async function guardarRegistro(){
     if(fotos.despues){
       despues_path=await subirFoto(fotos.despues.blob,'despues');
       uploaded.push(despues_path);
+    }
+
+    if(fotos.pago){
+      pago_path=await subirFoto(fotos.pago.blob,'pago');
+      uploaded.push(pago_path);
     }
 
     const {data,error}=await supabaseClient
@@ -758,6 +779,9 @@ async function guardarRegistro(){
         qr_path,
         antes_path,
         despues_path,
+        pago_path,
+        latitud:Number(document.getElementById('latitud')?.value) || null,
+        longitud:Number(document.getElementById('longitud')?.value) || null,
         sino:sino||null,
         eliminado:false
       })
@@ -926,6 +950,16 @@ function verRegistro(id){
         Después
       </div>
       <img src="${r.despues_url}" alt="Después">
+    `;
+  }
+
+
+  if(r.pago_url){
+    html+=`
+      <div style="margin-top:10px;font-weight:700;font-size:12.5px;">
+        💳 Captura de pago
+      </div>
+      <img src="${r.pago_url}" alt="Captura de pago">
     `;
   }
 

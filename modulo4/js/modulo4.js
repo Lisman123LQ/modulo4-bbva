@@ -71,7 +71,8 @@ let papeleraRegistros = [];
 let fotos = {
   qr: null,
   antes: null,
-  despues: null
+  despues: null,
+  pago: null
 };
 
 let currentUser = null;
@@ -669,6 +670,8 @@ async function prepararUrlsFotos() {
 
     r.despues_url =
       urlMap[r.despues_path] || '';
+    r.pago_url =
+      urlMap[r.pago_path] || '';
   });
 }
 
@@ -746,6 +749,8 @@ async function prepararUrlsPapelera() {
 
     r.despues_url =
       urlMap[r.despues_path] || '';
+    r.pago_url =
+      urlMap[r.pago_path] || '';
   });
 }
 
@@ -1374,6 +1379,12 @@ setupPhotoBox(
   'file-despues'
 );
 
+setupPhotoBox(
+  'pago',
+  'box-pago',
+  'file-pago'
+);
+
 
 /* =========================
    SELECTOR DE UBICACIÓN MANUAL
@@ -1459,11 +1470,22 @@ async function actualizarRegistro(){
   if(!numero){alert('Ingresa el número.');return false;}
   const dup=registros.some(r=>String(r.id)!==String(editandoId) && (String(r.dni||'').trim()===dni || String(r.numero||'').trim()===numero));
   if(dup){alert('El DNI o número ya pertenece a otro registro.');return false;}
-  const {error}=await supabaseClient.from('bbva_registros').update({
+  let nuevoPagoPath = null;
+  try{
+    if(fotos.pago){
+      nuevoPagoPath = await subirFoto(fotos.pago.blob,'pago');
+    }
+  }catch(error){
+    alert('❌ No se pudo subir la captura de pago: '+error.message);
+    return false;
+  }
+  const cambios = {
     dni,cliente:cliente||null,numero,
     latitud:lat!==null?Number(lat):null,
     longitud:lng!==null?Number(lng):null
-  }).eq('id',editandoId);
+  };
+  if(nuevoPagoPath) cambios.pago_path=nuevoPagoPath;
+  const {error}=await supabaseClient.from('bbva_registros').update(cambios).eq('id',editandoId);
   if(error){alert('❌ No se pudo actualizar: '+error.message);return false;}
   alert('✅ Registro actualizado correctamente.');
   editandoId=null;
@@ -1527,7 +1549,8 @@ function limpiarCampos() {
   fotos = {
     qr: null,
     antes: null,
-    despues: null
+    despues: null,
+    pago: null
   };
 
   rebuildPhotoBox(
@@ -1828,6 +1851,12 @@ async function guardarRegistro() {
       );
     }
 
+    let pago_path = null;
+    if (fotos.pago) {
+      pago_path = await subirFoto(fotos.pago.blob,'pago');
+      uploaded.push(pago_path);
+    }
+
 
     /* =========================
        CORRELATIVO
@@ -1871,6 +1900,7 @@ async function guardarRegistro() {
           qr_path: qr_path,
           antes_path: antes_path,
           despues_path: despues_path,
+          pago_path: pago_path,
           sino: sino,
           eliminado: false
         })
@@ -2389,6 +2419,16 @@ function verRegistro(id) {
         alt="Después"
       >
       `;
+  }
+
+
+  if(r.pago_url){
+    html+=`
+      <div style="margin-top:10px;font-weight:700;font-size:12.5px;">
+        💳 Captura de pago
+      </div>
+      <img src="${r.pago_url}" alt="Captura de pago">
+    `;
   }
 
   modalBody.innerHTML =

@@ -64,7 +64,8 @@ USING (user_id = auth.uid() OR public.is_admin());
 -- UBICACIÓN MANUAL EN MAPA
 ALTER TABLE public.bbva_registros
   ADD COLUMN IF NOT EXISTS latitud double precision,
-  ADD COLUMN IF NOT EXISTS longitud double precision;
+  ADD COLUMN IF NOT EXISTS longitud double precision,
+  ADD COLUMN IF NOT EXISTS pago_path text;
 
 CREATE INDEX IF NOT EXISTS idx_bbva_registros_ubicacion
 ON public.bbva_registros (latitud, longitud);

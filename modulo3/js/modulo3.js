@@ -33,7 +33,8 @@ let registros = [];
 let fotos = {
   qr:null,
   antes:null,
-  despues:null
+  despues:null,
+  pago:null
 };
 
 let currentUser = null;
@@ -598,6 +599,8 @@ async function prepararUrlsFotos(){
 
     r.despues_url =
       urlMap[r.despues_path] || '';
+    r.pago_url =
+      urlMap[r.pago_path] || '';
 
   });
 }
@@ -1218,6 +1221,11 @@ function rebuildPhotoBox(
     despues:[
       'FOTO<br>DESPUÉS',
       'Opcional'
+    ],
+
+    pago:[
+      'CAPTURA<br>DE PAGO',
+      'Opcional'
     ]
 
   };
@@ -1300,6 +1308,12 @@ setupPhotoBox(
   'despues',
   'box-despues',
   'file-despues'
+);
+
+setupPhotoBox(
+  'pago',
+  'box-pago',
+  'file-pago'
 );
 
 
@@ -1387,11 +1401,22 @@ async function actualizarRegistro(){
   if(!numero){alert('Ingresa el número.');return false;}
   const dup=registros.some(r=>String(r.id)!==String(editandoId) && (String(r.dni||'').trim()===dni || String(r.numero||'').trim()===numero));
   if(dup){alert('El DNI o número ya pertenece a otro registro.');return false;}
-  const {error}=await supabaseClient.from('bbva_registros').update({
+  let nuevoPagoPath = null;
+  try{
+    if(fotos.pago){
+      nuevoPagoPath = await subirFoto(fotos.pago.blob,'pago');
+    }
+  }catch(error){
+    alert('❌ No se pudo subir la captura de pago: '+error.message);
+    return false;
+  }
+  const cambios = {
     dni,cliente:cliente||null,numero,
     latitud:lat!==null?Number(lat):null,
     longitud:lng!==null?Number(lng):null
-  }).eq('id',editandoId);
+  };
+  if(nuevoPagoPath) cambios.pago_path=nuevoPagoPath;
+  const {error}=await supabaseClient.from('bbva_registros').update(cambios).eq('id',editandoId);
   if(error){alert('❌ No se pudo actualizar: '+error.message);return false;}
   alert('✅ Registro actualizado correctamente.');
   editandoId=null;
@@ -1448,7 +1473,8 @@ function limpiarCampos(){
   fotos={
     qr:null,
     antes:null,
-    despues:null
+    despues:null,
+    pago:null
   };
 
 
@@ -1726,6 +1752,7 @@ async function guardarRegistro(){
 
     let antes_path=null;
     let despues_path=null;
+    let pago_path=null;
 
 
     if(fotos.antes){
@@ -1757,6 +1784,11 @@ async function guardarRegistro(){
 
     }
 
+    if(fotos.pago){
+      pago_path = await subirFoto(fotos.pago.blob,'pago');
+      uploaded.push(pago_path);
+    }
+
 
     const {data,error} =
       await supabaseClient
@@ -1781,6 +1813,12 @@ async function guardarRegistro(){
           antes_path,
 
           despues_path,
+
+          pago_path,
+
+          latitud: document.getElementById('latitud')?.value ? Number(document.getElementById('latitud').value) : null,
+
+          longitud: document.getElementById('longitud')?.value ? Number(document.getElementById('longitud').value) : null,
 
           sino:
             sino || null,
@@ -2216,6 +2254,16 @@ function verRegistro(id){
 
   }
 
+
+
+  if(r.pago_url){
+    html+=`
+      <div style="margin-top:10px;font-weight:700;font-size:12.5px;">
+        💳 Captura de pago
+      </div>
+      <img src="${r.pago_url}" alt="Captura de pago">
+    `;
+  }
 
   document.getElementById(
     'modalBody'
