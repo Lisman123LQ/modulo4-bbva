@@ -26,8 +26,26 @@ const BUCKET = 'bbva-fotos';
 
 const supabaseClient = window.supabase.createClient(
   SUPABASE_URL,
-  SUPABASE_KEY
+  SUPABASE_KEY,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storage: window.localStorage,
+      storageKey: 'bbva-sistema-auth'
+    }
+  }
 );
+/* SESION_COMPARTIDA_BBVA: la sesión de Supabase permanece al cambiar de módulo. */
+(function(){
+  try {
+    window.addEventListener('storage', function(e){
+      if(e.key === 'bbva_app_logout' && e.newValue){ location.reload(); }
+    });
+  } catch(e) {}
+})();
+
 
 let registros = [];
 let fotos = { qr:null, antes:null, despues:null, pago:null };
@@ -153,7 +171,7 @@ async function cargarSesion(user){
     .maybeSingle();
 
   if(error || !profile){
-    alert('La cuenta existe, pero todavía no tiene un perfil en el Módulo 4.');
+    alert('La cuenta existe, pero todavía no tiene un perfil en el Módulo 2.');
     await supabaseClient.auth.signOut();
     mostrarLogin();
     return;
@@ -193,13 +211,16 @@ async function inicializar(){
 
     if(session){
       try{
-        await cargarSesion(session.user);
+        await Promise.race([
+          cargarSesion(session.user),
+          timeout(TIMEOUT)
+        ]);
       }catch(error){
         console.error('No se pudo cargar la sesión/perfil:', error);
-        await supabaseClient.auth.signOut().catch(()=>{});
-        currentUser=null;
-        currentProfile=null;
-        mostrarLogin();
+        // Se conserva la sesión aunque la carga del perfil tarde.
+        
+        currentUser = session?.user || currentUser;
+        if(currentUser) ocultarLogin();
         mostrarErrorLogin('La conexión con Supabase está tardando. Vuelve a intentar iniciar sesión.');
       }
     }else{
@@ -309,86 +330,277 @@ function siguienteCorrelativo(){
   document.getElementById('correlativo').textContent = pad(siguiente);
 }
 
-/* =========================
-   BUSQUEDA DNI + NOMBRE AUTOMATICO
-   ========================= */
+/* =========================================================
+   BUSQUEDA DNI + NOMBRE AUTOMÁTICO
+   SUPABASE EDGE FUNCTION + APISPERU
+   ========================================================= */
 
-/*
-   API de consulta DNI.
-   Pega aquí tu token de consulta de DNI (no el de Supabase).
-   La API usada es apis.net.pe / RENIEC.
-*/
-const DNI_API_TOKEN = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6IjE5bGlzbWFuQGdtYWlsLmNvbSIsImp0aSI6ImYwNjU0NTIwMTYwMjg2YTAifQ.eDOx15S2NN9hCPIu-qo-PqPgiS9xUqIfrkuN4SdlFHY';
-const DNI_API_URL = 'https://api.apis.net.pe/v2/reniec/dni?numero=';
+const dniInput =
+  document.getElementById('dni');
 
-const dniInput = document.getElementById('dni');
-const clienteInput = document.getElementById('cliente');
+const clienteInput =
+  document.getElementById('cliente');
+
 let dniTimer = null;
 
-async function consultarDNI(dni){
-  const msg = document.getElementById('dniMsg');
 
-  if(!DNI_API_TOKEN || DNI_API_TOKEN === 'PEGA_AQUI_TU_TOKEN_DNI'){
-    msg.innerHTML = '<div class="hint">DNI válido. Para colocar el nombre automáticamente falta configurar el token de consulta DNI.</div>';
+/* =========================
+   CONSULTAR DNI
+   ========================= */
+
+async function consultarDNI(dni){
+
+  const msg =
+    document.getElementById('dniMsg');
+
+
+  if(!msg || !clienteInput){
     return;
   }
 
-  msg.innerHTML = '<div class="hint">Consultando DNI...</div>';
+
+  if(!/^\d{8}$/.test(dni)){
+
+    msg.innerHTML =
+      '<div class="hint">' +
+      'El DNI debe tener exactamente 8 dígitos.' +
+      '</div>';
+
+    return;
+  }
+
+
+  msg.innerHTML =
+    '<div class="hint">' +
+    'Consultando DNI...' +
+    '</div>';
+
 
   try{
-    const response = await fetch(DNI_API_URL + encodeURIComponent(dni), {
-      method:'GET',
-      headers:{
-        'Authorization':'Bearer ' + DNI_API_TOKEN,
-        'Accept':'application/json'
-      }
-    });
 
-    const data = await response.json().catch(()=>({}));
+    /*
+      IMPORTANTE:
 
-    if(!response.ok){
-      throw new Error(data.message || data.error || ('HTTP '+response.status));
+      Ya NO usamos el token de APISPERU aquí.
+
+      La consulta se hace mediante:
+
+      Supabase
+          ↓
+      Edge Function consultar-dni
+          ↓
+      APISPERU
+    */
+
+    const {data,error} =
+      await supabaseClient.functions.invoke(
+        'consultar-dni',
+        {
+          body:{
+            dni:dni
+          }
+        }
+      );
+
+
+    console.log(
+      'Respuesta DNI:',
+      data
+    );
+
+
+    if(error){
+
+      console.error(
+        'Error de Supabase:',
+        error
+      );
+
+      throw new Error(
+        error.message ||
+        'No se pudo conectar con la consulta DNI.'
+      );
     }
 
-    const nombre = (
-      data.nombre_completo ||
-      [data.nombres, data.apellido_paterno, data.apellido_materno]
-        .filter(Boolean).join(' ')
-    ).trim();
+
+    if(!data){
+
+      throw new Error(
+        'La consulta no devolvió información.'
+      );
+    }
+
+
+    if(data.success === false){
+
+      throw new Error(
+        data.message ||
+        'No se pudo consultar el DNI.'
+      );
+    }
+
+
+    /*
+      La Edge Function devuelve:
+
+      nombre:
+      LISMAN ERCILIO LOPEZ QUEZADA
+
+      También devuelve:
+      nombres
+      apellido_paterno
+      apellido_materno
+    */
+
+
+    const nombre =
+      String(
+        data.nombre ||
+        data.nombre_completo ||
+        data.nombreCompleto ||
+        [
+          data.nombres,
+          data.apellido_paterno,
+          data.apellido_materno
+        ]
+        .filter(Boolean)
+        .join(' ')
+      )
+      .trim();
+
 
     if(!nombre){
-      throw new Error('La API no devolvió el nombre para este DNI.');
+
+      throw new Error(
+        'La API no devolvió el nombre para este DNI.'
+      );
     }
 
-    clienteInput.value = nombre.toUpperCase();
-    msg.innerHTML = '<div class="ok">✓ Cliente encontrado: '+esc(nombre)+'</div>';
+
+    /*
+      COLOCAR NOMBRE AUTOMÁTICAMENTE
+    */
+
+    clienteInput.value =
+      nombre.toUpperCase();
+
+
+    msg.innerHTML =
+      '<div class="ok">' +
+      '✓ Cliente encontrado: ' +
+      esc(nombre) +
+      '</div>';
+
+
   }catch(error){
-    console.error('Error consultando DNI:', error);
-    msg.innerHTML = '<div class="hint">No se pudo consultar el DNI: '+esc(error.message||'Error de consulta')+'. Puedes escribir el nombre manualmente.</div>';
+
+    console.error(
+      'Error consultando DNI:',
+      error
+    );
+
+
+    msg.innerHTML =
+      '<div class="hint">' +
+      'No se pudo consultar el DNI: ' +
+      esc(
+        error.message ||
+        'Error de consulta'
+      ) +
+      '. Puedes escribir el nombre manualmente.' +
+      '</div>';
+
   }
 }
 
-dniInput.addEventListener('input', function(){
-  let v = this.value.replace(/\D/g,'').slice(0,8);
-  this.value = v;
 
-  const msg = document.getElementById('dniMsg');
-  msg.innerHTML = '';
+/* =========================
+   DETECTAR DNI
+   ========================= */
 
-  clearTimeout(dniTimer);
+if(dniInput){
 
-  if(v.length === 0){
-    clienteInput.value = '';
-    return;
-  }
+  dniInput.addEventListener(
+    'input',
+    function(){
 
-  if(v.length < 8){
-    msg.innerHTML = '<div class="hint">Faltan '+(8-v.length)+' dígitos.</div>';
-    return;
-  }
+      let v =
+        this.value
+          .replace(/\D/g,'')
+          .slice(0,8);
 
-  dniTimer = setTimeout(()=>consultarDNI(v), 250);
-});
+
+      this.value=v;
+
+
+      const msg =
+        document.getElementById(
+          'dniMsg'
+        );
+
+
+      if(msg){
+        msg.innerHTML='';
+      }
+
+
+      clearTimeout(dniTimer);
+
+
+      /*
+        Si borra completamente el DNI,
+        también borramos el cliente.
+      */
+
+      if(v.length===0){
+
+        if(clienteInput){
+          clienteInput.value='';
+        }
+
+        return;
+      }
+
+
+      /*
+        Mostrar dígitos faltantes.
+      */
+
+      if(v.length<8){
+
+        if(msg){
+
+          msg.innerHTML =
+            '<div class="hint">' +
+            'Faltan ' +
+            (8-v.length) +
+            ' dígitos.' +
+            '</div>';
+
+        }
+
+        return;
+      }
+
+
+      /*
+        Al completar los 8 dígitos,
+        esperamos 250 ms y consultamos.
+      */
+
+      dniTimer =
+        setTimeout(
+          ()=>{
+            consultarDNI(v);
+          },
+          250
+        );
+
+    }
+  );
+
+}
+
 
 /* =========================
    NUMERO DUPLICADO
@@ -525,34 +737,74 @@ function abrirMapa(){
     alert('No se pudo cargar el mapa. Verifica tu conexión a Internet.');
     return;
   }
-  const lat=Number(document.getElementById('latitud')?.value);
-  const lng=Number(document.getElementById('longitud')?.value);
+
+  const latInput=document.getElementById('latitud');
+  const lngInput=document.getElementById('longitud');
+  const lat=Number(latInput?.value);
+  const lng=Number(lngInput?.value);
+
+  // Si ya existe una ubicación guardada, se usa esa.
+  // Si no existe, el mapa inicia centrado en Chimbote.
   ubicacionTemporal={
-    lat:Number.isFinite(lat)?lat:-12.046374,
-    lng:Number.isFinite(lng)?lng:-77.042793
+    lat:Number.isFinite(lat) ? lat : -9.0853,
+    lng:Number.isFinite(lng) ? lng : -78.5783
   };
+
   bg.classList.add('show');
+
   setTimeout(()=>{
     if(!mapa){
-      mapa=L.map('locationMap').setView([ubicacionTemporal.lat,ubicacionTemporal.lng],13);
+      mapa=L.map('locationMap',{
+        zoomControl:true,
+        dragging:true,
+        touchZoom:true,
+        doubleClickZoom:true,
+        scrollWheelZoom:true
+      }).setView([ubicacionTemporal.lat,ubicacionTemporal.lng],14);
+
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
         maxZoom:19,
-        attribution:'&copy; OpenStreetMap'
+        attribution:'&copy; OpenStreetMap contributors'
       }).addTo(mapa);
+
+      // Tocar/clickear cualquier punto mueve la ubicación.
       mapa.on('click',e=>seleccionarPunto(e.latlng.lat,e.latlng.lng));
     }else{
       mapa.invalidateSize();
-      mapa.setView([ubicacionTemporal.lat,ubicacionTemporal.lng],13);
+      mapa.setView([ubicacionTemporal.lat,ubicacionTemporal.lng],14);
     }
+
     seleccionarPunto(ubicacionTemporal.lat,ubicacionTemporal.lng);
   },100);
 }
+
 function seleccionarPunto(lat,lng){
-  ubicacionTemporal={lat:Number(lat),lng:Number(lng)};
-  if(marcadorMapa) marcadorMapa.setLatLng([lat,lng]);
-  else if(mapa) marcadorMapa=L.marker([lat,lng]).addTo(mapa);
+  lat=Number(lat);
+  lng=Number(lng);
+
+  if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+  ubicacionTemporal={lat:lat,lng:lng};
+
+  if(marcadorMapa){
+    marcadorMapa.setLatLng([lat,lng]);
+  }else if(mapa){
+    // El marcador también se puede arrastrar con el dedo.
+    marcadorMapa=L.marker([lat,lng],{
+      draggable:true,
+      autoPan:true
+    }).addTo(mapa);
+
+    marcadorMapa.on('dragend',function(e){
+      const p=e.target.getLatLng();
+      seleccionarPunto(p.lat,p.lng);
+    });
+  }
+
   const el=document.getElementById('mapCoords');
-  if(el) el.textContent='Latitud: '+Number(lat).toFixed(6)+' · Longitud: '+Number(lng).toFixed(6);
+  if(el){
+    el.textContent='Latitud: '+lat.toFixed(6)+' · Longitud: '+lng.toFixed(6);
+  }
 }
 
 function usarMiUbicacion(){
@@ -560,42 +812,89 @@ function usarMiUbicacion(){
     alert('Tu navegador no permite obtener la ubicación GPS.');
     return;
   }
+
   const btn=document.getElementById('btnMiUbicacion');
-  if(btn){ btn.disabled=true; btn.textContent='📍 Buscando ubicación...'; }
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='📍 Buscando ubicación...';
+  }
+
   navigator.geolocation.getCurrentPosition(
     function(position){
       const lat=position.coords.latitude;
       const lng=position.coords.longitude;
+
       seleccionarPunto(lat,lng);
-      if(mapa) mapa.setView([lat,lng],16);
-      if(btn){ btn.disabled=false; btn.textContent='📍 Mi ubicación'; }
+
+      if(mapa){
+        mapa.setView([lat,lng],16);
+      }
+
+      if(btn){
+        btn.disabled=false;
+        btn.textContent='📍 Mi ubicación';
+      }
     },
     function(error){
       let mensaje='No se pudo obtener tu ubicación.';
-      if(error.code===1) mensaje='Debes permitir el acceso a la ubicación en tu celular.';
-      else if(error.code===2) mensaje='No se pudo determinar tu ubicación. Intenta nuevamente.';
-      else if(error.code===3) mensaje='La búsqueda de ubicación tardó demasiado.';
+
+      if(error.code===1){
+        mensaje='Debes permitir el acceso a la ubicación en tu celular.';
+      }else if(error.code===2){
+        mensaje='No se pudo determinar tu ubicación. Intenta nuevamente.';
+      }else if(error.code===3){
+        mensaje='La búsqueda de ubicación tardó demasiado.';
+      }
+
       alert(mensaje);
-      if(btn){ btn.disabled=false; btn.textContent='📍 Mi ubicación'; }
+
+      if(btn){
+        btn.disabled=false;
+        btn.textContent='📍 Mi ubicación';
+      }
     },
-    {enableHighAccuracy:true,timeout:15000,maximumAge:0}
+    {
+      enableHighAccuracy:true,
+      timeout:10000,
+      maximumAge:0
+    }
   );
 }
 
 function confirmarUbicacion(){
-  if(ubicacionTemporal.lat===null || ubicacionTemporal.lng===null){return;}
-  const lat=document.getElementById('latitud'),lng=document.getElementById('longitud');
+  if(ubicacionTemporal.lat===null || ubicacionTemporal.lng===null){
+    alert('Selecciona una ubicación en el mapa.');
+    return;
+  }
+
+  const lat=document.getElementById('latitud');
+  const lng=document.getElementById('longitud');
+
   if(lat) lat.value=ubicacionTemporal.lat.toFixed(6);
   if(lng) lng.value=ubicacionTemporal.lng.toFixed(6);
+
   cerrarMapa();
 }
-function cerrarMapa(){document.getElementById('mapPickerBg')?.classList.remove('show');}
+
+function cerrarMapa(){
+  document.getElementById('mapPickerBg')?.classList.remove('show');
+}
+
 function limpiarUbicacion(){
-  const lat=document.getElementById('latitud'),lng=document.getElementById('longitud');
+  const lat=document.getElementById('latitud');
+  const lng=document.getElementById('longitud');
+
   if(lat) lat.value='';
   if(lng) lng.value='';
+
   ubicacionTemporal={lat:null,lng:null};
+
+  if(marcadorMapa && mapa){
+    mapa.removeLayer(marcadorMapa);
+    marcadorMapa=null;
+  }
 }
+
 function obtenerUbicacionRegistro(r){
   return {lat:r?.latitud??null,lng:r?.longitud??null};
 }

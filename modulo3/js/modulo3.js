@@ -26,8 +26,26 @@ const BUCKET = 'bbva-fotos';
 
 const supabaseClient = window.supabase.createClient(
   SUPABASE_URL,
-  SUPABASE_KEY
+  SUPABASE_KEY,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storage: window.localStorage,
+      storageKey: 'bbva-sistema-auth'
+    }
+  }
 );
+/* SESION_COMPARTIDA_BBVA: la sesión de Supabase permanece al cambiar de módulo. */
+(function(){
+  try {
+    window.addEventListener('storage', function(e){
+      if(e.key === 'bbva_app_logout' && e.newValue){ location.reload(); }
+    });
+  } catch(e) {}
+})();
+
 
 let registros = [];
 let fotos = {
@@ -284,10 +302,12 @@ async function cargarSesion(user){
       'La cuenta existe, pero todavía no tiene un perfil en el Módulo 3.'
     );
 
-    await supabaseClient.auth.signOut();
-
-    mostrarLogin();
-
+    console.warn('Perfil no disponible en este módulo. Se conserva la sesión de Supabase.', error);
+    currentProfile = null;
+    const userName = document.getElementById('userName');
+    if(userName){ userName.textContent = user.email || 'Usuario'; }
+    ocultarLogin();
+    await cargarRegistros();
     return;
   }
 
@@ -384,14 +404,9 @@ async function inicializar(){
           error
         );
 
-        await supabaseClient.auth
-          .signOut()
-          .catch(()=>{});
-
-        currentUser=null;
-        currentProfile=null;
-
-        mostrarLogin();
+        // Se conserva la sesión aunque la carga del perfil tarde.
+        currentUser = (session && session.user) ? session.user : currentUser;
+        if(currentUser){ ocultarLogin(); }
 
         mostrarErrorLogin(
           'La conexión con Supabase está tardando. Vuelve a intentar iniciar sesión.'

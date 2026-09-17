@@ -56,8 +56,26 @@ const BUCKET = 'bbva-fotos';
 
 const supabaseClient = window.supabase.createClient(
   SUPABASE_URL,
-  SUPABASE_KEY
+  SUPABASE_KEY,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storage: window.localStorage,
+      storageKey: 'bbva-sistema-auth'
+    }
+  }
 );
+/* SESION_COMPARTIDA_BBVA: la sesión de Supabase permanece al cambiar de módulo. */
+(function(){
+  try {
+    window.addEventListener('storage', function(e){
+      if(e.key === 'bbva_app_logout' && e.newValue){ location.reload(); }
+    });
+  } catch(e) {}
+})();
+
 
 
 /* =========================
@@ -331,30 +349,15 @@ async function cargarSesion(user) {
       .eq('id', user.id)
       .maybeSingle();
 
-  if (error) {
-    console.error('Error cargando perfil:', error);
-
-    alert(
-      'No se pudo cargar tu perfil.\n\n' +
-      error.message
-    );
-
-    await supabaseClient.auth.signOut();
-
-    mostrarLogin();
-
-    return;
-  }
-
-  if (!profile) {
-    alert(
-      'La cuenta existe, pero todavía no tiene un perfil en el Módulo 4.'
-    );
-
-    await supabaseClient.auth.signOut();
-
-    mostrarLogin();
-
+  if (error || !profile) {
+    console.warn('Perfil no disponible en este módulo. Se conserva la sesión de Supabase.', error);
+    currentProfile = profile || null;
+    const userName = document.getElementById('userName');
+    if (userName) {
+      userName.textContent = user.email || 'Usuario';
+    }
+    ocultarLogin();
+    await cargarRegistros();
     return;
   }
 
@@ -443,7 +446,10 @@ async function inicializar() {
 
       try {
 
-        await cargarSesion(session.user);
+        await Promise.race([
+          cargarSesion(session.user),
+          timeout(TIMEOUT)
+        ]);
 
       } catch (error) {
 
@@ -452,14 +458,9 @@ async function inicializar() {
           error
         );
 
-        await supabaseClient.auth
-          .signOut()
-          .catch(function () {});
-
-        currentUser = null;
-        currentProfile = null;
-
-        mostrarLogin();
+        // Se conserva la sesión aunque la carga del perfil tarde.
+        currentUser = (session && session.user) ? session.user : currentUser;
+        if(currentUser){ ocultarLogin(); }
 
         mostrarErrorLogin(
           'La conexión con Supabase está tardando. ' +
