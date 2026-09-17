@@ -460,7 +460,10 @@
 <div class="map-picker-bg" id="mapPickerBg">
   <div class="map-picker">
     <h3>🗺️ Seleccionar ubicación</h3>
-    <div class="hint">Haz clic en cualquier punto del mapa para colocar una ubicación manual.</div>
+    <div class="hint">Toca cualquier punto del mapa o arrastra 📍 para mover la ubicación. También puedes usar el GPS del celular.</div>
+    <div class="map-picker-tools">
+      <button type="button" class="btn btn-blue" id="btnMiUbicacion" onclick="usarMiUbicacion()">📍 Mi ubicación</button>
+    </div>
     <div id="locationMap"></div>
     <div id="mapCoords" class="hint">Latitud: — · Longitud: —</div>
     <div class="map-picker-actions">

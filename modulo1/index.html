@@ -15,7 +15,7 @@
 
 <body class="locked">
 
-<div class="auth-bg" id="authBg" style="display:none;">
+<div class="auth-bg" id="authBg">
   <div class="auth-card">
     <h2>CLIENTES YAPE · YAPE</h2>
     <p>Inicia sesión con tu cuenta para registrar y consultar tus datos.</p>
@@ -27,9 +27,7 @@
     <button class="btn btn-blue" id="loginBtn" onclick="iniciarSesion()">🔐 Ingresar</button>
   </div>
 </div>
-<div class="loading-screen" id="loadingScreen">
-  Verificando sesión...
-</div>
+<div class="loading-screen" id="loadingScreen">Cargando Módulo 4…</div>
 
 
 <header>
@@ -205,9 +203,7 @@
       <div><label>Latitud</label><input type="number" id="latitud" step="any" placeholder="-12.046374"></div>
       <div><label>Longitud</label><input type="number" id="longitud" step="any" placeholder="-77.042793"></div>
     </div>
-    <div class="hint">
-  📍 La ubicación debe estar dentro de Áncash. No se utiliza el GPS del dispositivo.
-</div>
+    <div class="hint">Puedes elegir cualquier punto del mapa. No se usa el GPS de tu dispositivo.</div>
   </div>
 
   <!-- FOTOS -->
@@ -487,9 +483,7 @@
 <div class="map-picker-bg" id="mapPickerBg">
   <div class="map-picker">
     <h3>🗺️ Seleccionar ubicación</h3>
-<div class="hint">
-  📍 Selecciona únicamente una ubicación dentro de Áncash, Perú.
-</div>
+    <div class="hint">Haz clic en cualquier punto del mapa para colocar una ubicación manual.</div>
     <div id="locationMap"></div>
     <div id="mapCoords" class="hint">Latitud: — · Longitud: —</div>
     <div class="map-picker-actions">

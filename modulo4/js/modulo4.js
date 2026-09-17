@@ -1395,49 +1395,164 @@ function abrirMapa(){
     alert('No se pudo cargar el mapa. Verifica tu conexión a Internet.');
     return;
   }
-  const lat=Number(document.getElementById('latitud')?.value);
-  const lng=Number(document.getElementById('longitud')?.value);
+
+  const latInput=document.getElementById('latitud');
+  const lngInput=document.getElementById('longitud');
+  const lat=Number(latInput?.value);
+  const lng=Number(lngInput?.value);
+
+  // Si ya existe una ubicación guardada, se usa esa.
+  // Si no existe, el mapa inicia centrado en Chimbote.
   ubicacionTemporal={
-    lat:Number.isFinite(lat)?lat:-12.046374,
-    lng:Number.isFinite(lng)?lng:-77.042793
+    lat:Number.isFinite(lat) ? lat : -9.0853,
+    lng:Number.isFinite(lng) ? lng : -78.5783
   };
+
   bg.classList.add('show');
+
   setTimeout(()=>{
     if(!mapa){
-      mapa=L.map('locationMap').setView([ubicacionTemporal.lat,ubicacionTemporal.lng],13);
+      mapa=L.map('locationMap',{
+        zoomControl:true,
+        dragging:true,
+        touchZoom:true,
+        doubleClickZoom:true,
+        scrollWheelZoom:true
+      }).setView([ubicacionTemporal.lat,ubicacionTemporal.lng],14);
+
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
         maxZoom:19,
-        attribution:'&copy; OpenStreetMap'
+        attribution:'&copy; OpenStreetMap contributors'
       }).addTo(mapa);
+
+      // Tocar/clickear cualquier punto mueve la ubicación.
       mapa.on('click',e=>seleccionarPunto(e.latlng.lat,e.latlng.lng));
     }else{
       mapa.invalidateSize();
-      mapa.setView([ubicacionTemporal.lat,ubicacionTemporal.lng],13);
+      mapa.setView([ubicacionTemporal.lat,ubicacionTemporal.lng],14);
     }
+
     seleccionarPunto(ubicacionTemporal.lat,ubicacionTemporal.lng);
   },100);
 }
+
 function seleccionarPunto(lat,lng){
-  ubicacionTemporal={lat:Number(lat),lng:Number(lng)};
-  if(marcadorMapa) marcadorMapa.setLatLng([lat,lng]);
-  else if(mapa) marcadorMapa=L.marker([lat,lng]).addTo(mapa);
+  lat=Number(lat);
+  lng=Number(lng);
+
+  if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+  ubicacionTemporal={lat:lat,lng:lng};
+
+  if(marcadorMapa){
+    marcadorMapa.setLatLng([lat,lng]);
+  }else if(mapa){
+    // El marcador también se puede arrastrar con el dedo.
+    marcadorMapa=L.marker([lat,lng],{
+      draggable:true,
+      autoPan:true
+    }).addTo(mapa);
+
+    marcadorMapa.on('dragend',function(e){
+      const p=e.target.getLatLng();
+      seleccionarPunto(p.lat,p.lng);
+    });
+  }
+
   const el=document.getElementById('mapCoords');
-  if(el) el.textContent='Latitud: '+Number(lat).toFixed(6)+' · Longitud: '+Number(lng).toFixed(6);
+  if(el){
+    el.textContent='Latitud: '+lat.toFixed(6)+' · Longitud: '+lng.toFixed(6);
+  }
 }
+
+function usarMiUbicacion(){
+  if(!navigator.geolocation){
+    alert('Tu navegador no permite obtener la ubicación GPS.');
+    return;
+  }
+
+  const btn=document.getElementById('btnMiUbicacion');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='📍 Buscando ubicación...';
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    function(position){
+      const lat=position.coords.latitude;
+      const lng=position.coords.longitude;
+
+      seleccionarPunto(lat,lng);
+
+      if(mapa){
+        mapa.setView([lat,lng],16);
+      }
+
+      if(btn){
+        btn.disabled=false;
+        btn.textContent='📍 Mi ubicación';
+      }
+    },
+    function(error){
+      let mensaje='No se pudo obtener tu ubicación.';
+
+      if(error.code===1){
+        mensaje='Debes permitir el acceso a la ubicación en tu celular.';
+      }else if(error.code===2){
+        mensaje='No se pudo determinar tu ubicación. Intenta nuevamente.';
+      }else if(error.code===3){
+        mensaje='La búsqueda de ubicación tardó demasiado.';
+      }
+
+      alert(mensaje);
+
+      if(btn){
+        btn.disabled=false;
+        btn.textContent='📍 Mi ubicación';
+      }
+    },
+    {
+      enableHighAccuracy:true,
+      timeout:10000,
+      maximumAge:0
+    }
+  );
+}
+
 function confirmarUbicacion(){
-  if(ubicacionTemporal.lat===null || ubicacionTemporal.lng===null){return;}
-  const lat=document.getElementById('latitud'),lng=document.getElementById('longitud');
+  if(ubicacionTemporal.lat===null || ubicacionTemporal.lng===null){
+    alert('Selecciona una ubicación en el mapa.');
+    return;
+  }
+
+  const lat=document.getElementById('latitud');
+  const lng=document.getElementById('longitud');
+
   if(lat) lat.value=ubicacionTemporal.lat.toFixed(6);
   if(lng) lng.value=ubicacionTemporal.lng.toFixed(6);
+
   cerrarMapa();
 }
-function cerrarMapa(){document.getElementById('mapPickerBg')?.classList.remove('show');}
+
+function cerrarMapa(){
+  document.getElementById('mapPickerBg')?.classList.remove('show');
+}
+
 function limpiarUbicacion(){
-  const lat=document.getElementById('latitud'),lng=document.getElementById('longitud');
+  const lat=document.getElementById('latitud');
+  const lng=document.getElementById('longitud');
+
   if(lat) lat.value='';
   if(lng) lng.value='';
+
   ubicacionTemporal={lat:null,lng:null};
+
+  if(marcadorMapa && mapa){
+    mapa.removeLayer(marcadorMapa);
+    marcadorMapa=null;
+  }
 }
+
 function obtenerUbicacionRegistro(r){
   return {lat:r?.latitud??null,lng:r?.longitud??null};
 }
