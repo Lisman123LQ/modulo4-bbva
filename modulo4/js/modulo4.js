@@ -443,10 +443,7 @@ async function inicializar() {
 
       try {
 
-        await Promise.race([
-          cargarSesion(session.user),
-          timeout(TIMEOUT)
-        ]);
+        await cargarSesion(session.user);
 
       } catch (error) {
 

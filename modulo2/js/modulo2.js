@@ -193,10 +193,7 @@ async function inicializar(){
 
     if(session){
       try{
-        await Promise.race([
-          cargarSesion(session.user),
-          timeout(TIMEOUT)
-        ]);
+        await cargarSesion(session.user);
       }catch(error){
         console.error('No se pudo cargar la sesión/perfil:', error);
         await supabaseClient.auth.signOut().catch(()=>{});
@@ -557,6 +554,34 @@ function seleccionarPunto(lat,lng){
   const el=document.getElementById('mapCoords');
   if(el) el.textContent='Latitud: '+Number(lat).toFixed(6)+' · Longitud: '+Number(lng).toFixed(6);
 }
+
+function usarMiUbicacion(){
+  if(!navigator.geolocation){
+    alert('Tu navegador no permite obtener la ubicación GPS.');
+    return;
+  }
+  const btn=document.getElementById('btnMiUbicacion');
+  if(btn){ btn.disabled=true; btn.textContent='📍 Buscando ubicación...'; }
+  navigator.geolocation.getCurrentPosition(
+    function(position){
+      const lat=position.coords.latitude;
+      const lng=position.coords.longitude;
+      seleccionarPunto(lat,lng);
+      if(mapa) mapa.setView([lat,lng],16);
+      if(btn){ btn.disabled=false; btn.textContent='📍 Mi ubicación'; }
+    },
+    function(error){
+      let mensaje='No se pudo obtener tu ubicación.';
+      if(error.code===1) mensaje='Debes permitir el acceso a la ubicación en tu celular.';
+      else if(error.code===2) mensaje='No se pudo determinar tu ubicación. Intenta nuevamente.';
+      else if(error.code===3) mensaje='La búsqueda de ubicación tardó demasiado.';
+      alert(mensaje);
+      if(btn){ btn.disabled=false; btn.textContent='📍 Mi ubicación'; }
+    },
+    {enableHighAccuracy:true,timeout:15000,maximumAge:0}
+  );
+}
+
 function confirmarUbicacion(){
   if(ubicacionTemporal.lat===null || ubicacionTemporal.lng===null){return;}
   const lat=document.getElementById('latitud'),lng=document.getElementById('longitud');
