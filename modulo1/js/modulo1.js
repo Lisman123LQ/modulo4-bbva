@@ -140,107 +140,337 @@ document.getElementById('loginPassword').addEventListener('keydown',e=>{
 });
 
 /* =========================
+   LOGIN / SESIÓN COMPARTIDA
+   ========================= */
+
+function mostrarLoading(show){
+  const el = document.getElementById('loadingScreen');
+  if(el){
+    el.style.display = show ? 'flex' : 'none';
+  }
+}
+
+function mostrarLogin(){
+  document.body.classList.add('locked');
+
+  const auth = document.getElementById('authBg');
+  const userBar = document.getElementById('userBar');
+
+  if(auth) auth.style.display = 'flex';
+  if(userBar) userBar.style.display = 'none';
+}
+
+function ocultarLogin(){
+  document.body.classList.remove('locked');
+
+  const auth = document.getElementById('authBg');
+  const userBar = document.getElementById('userBar');
+
+  if(auth) auth.style.display = 'none';
+  if(userBar) userBar.style.display = 'flex';
+}
+
+function mostrarErrorLogin(texto){
+  const box = document.getElementById('authError');
+
+  if(!box) return;
+
+  box.textContent = texto;
+  box.style.display = 'block';
+}
+
+async function iniciarSesion(){
+
+  const email =
+    document.getElementById('loginEmail').value.trim();
+
+  const password =
+    document.getElementById('loginPassword').value;
+
+  if(!email || !password){
+    mostrarErrorLogin('Escribe tu correo y contraseña.');
+    return;
+  }
+
+  const btn = document.getElementById('loginBtn');
+
+  btn.disabled = true;
+
+  document.getElementById('authError').style.display = 'none';
+
+  try{
+
+    const { data, error } =
+      await supabaseClient.auth.signInWithPassword({
+        email,
+        password
+      });
+
+    if(error){
+      mostrarErrorLogin(
+        'No se pudo iniciar sesión. Revisa el correo y la contraseña.'
+      );
+      return;
+    }
+
+    if(!data?.session || !data?.user){
+      mostrarErrorLogin(
+        'No se pudo crear la sesión. Inténtalo nuevamente.'
+      );
+      return;
+    }
+
+    /*
+      Supabase guarda automáticamente la sesión
+      en el navegador.
+
+      Al entrar después a otro módulo:
+      Módulo 1 → Módulo 2 → Módulo 3 → Módulo 4
+
+      se recuperará esta misma sesión.
+    */
+
+    await cargarSesion(data.user);
+
+  }catch(error){
+
+    console.error('Error de inicio de sesión:', error);
+
+    mostrarErrorLogin(
+      'Ocurrió un error al iniciar sesión.'
+    );
+
+  }finally{
+
+    btn.disabled = false;
+
+  }
+}
+
+
+async function cerrarSesion(){
+
+  try{
+    await supabaseClient.auth.signOut();
+  }catch(error){
+    console.error('Error cerrando sesión:', error);
+  }
+
+  currentUser = null;
+  currentProfile = null;
+  registros = [];
+  perfiles = {};
+
+  renderLista();
+
+  const password =
+    document.getElementById('loginPassword');
+
+  if(password){
+    password.value = '';
+  }
+
+  mostrarLogin();
+}
+
+
+/*
+  ENTER = iniciar sesión
+*/
+
+document
+  .getElementById('loginPassword')
+  .addEventListener('keydown', e => {
+
+    if(e.key === 'Enter'){
+      iniciarSesion();
+    }
+
+  });
+
+
+/* =========================
    SESIÓN / PERFIL
    ========================= */
 
 async function cargarSesion(user){
-  currentUser=user;
 
-  const {data:profile,error}=await supabaseClient
-    .from('profiles')
-    .select('id,nombre,role')
-    .eq('id',user.id)
-    .maybeSingle();
-
-  if(error || !profile){
-    alert('La cuenta existe, pero todavía no tiene un perfil en el Módulo 4.');
-    await supabaseClient.auth.signOut();
+  if(!user){
     mostrarLogin();
-    return;
+    return false;
   }
 
-  currentProfile=profile;
+  currentUser = user;
+
+  const { data: profile, error } =
+    await supabaseClient
+      .from('profiles')
+      .select('id,nombre,role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+  if(error){
+
+    console.error(
+      'Error consultando perfil:',
+      error
+    );
+
+    /*
+      IMPORTANTE:
+      NO cerrar sesión automáticamente.
+
+      Si cambia de módulo y la consulta tarda,
+      no debemos borrar la sesión.
+    */
+
+    mostrarErrorLogin(
+      'No se pudo cargar tu perfil. Revisa tu conexión.'
+    );
+
+    mostrarLogin();
+
+    return false;
+  }
+
+  if(!profile){
+
+    mostrarErrorLogin(
+      'Tu cuenta no tiene un perfil configurado.'
+    );
+
+    return false;
+  }
+
+  currentProfile = profile;
+
   document.getElementById('userName').textContent =
-    profile.nombre + (profile.role==='admin' ? ' · ADMIN' : '');
+    profile.nombre +
+    (profile.role === 'admin'
+      ? ' · ADMIN'
+      : '');
 
   ocultarLogin();
+
   await cargarRegistros();
+
+  return true;
 }
 
-supabaseClient.auth.onAuthStateChange(async (event,session)=>{
-  if(event==='SIGNED_OUT'){
-    mostrarLogin();
+
+/*
+  Escucha cambios reales de autenticación.
+*/
+
+supabaseClient.auth.onAuthStateChange(
+  (event, session) => {
+
+    console.log(
+      'Supabase Auth:',
+      event,
+      session?.user?.email || 'sin sesión'
+    );
+
+    if(event === 'SIGNED_OUT'){
+      currentUser = null;
+      currentProfile = null;
+      mostrarLogin();
+    }
+
   }
-});
+);
+
+
+/* =========================
+   INICIALIZAR
+   ========================= */
 
 async function inicializar(){
-  // La pantalla de carga nunca debe bloquear el sistema.
+
   mostrarLoading(true);
+
   const TIMEOUT = 7000;
-  const timeout = ms => new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('TIMEOUT')), ms)
-  );
+
+  const timeout =
+    ms => new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error('TIMEOUT')),
+        ms
+      )
+    );
 
   try{
-    const resultado = await Promise.race([
-      supabaseClient.auth.getSession(),
-      timeout(TIMEOUT)
-    ]);
-    const session = resultado?.data?.session || null;
 
-    // Quitar "Cargando" antes de cualquier consulta adicional.
-    mostrarLoading(false);
+    /*
+      Recuperamos la sesión que Supabase
+      guardó anteriormente en este navegador.
+    */
+
+    const resultado =
+      await Promise.race([
+        supabaseClient.auth.getSession(),
+        timeout(TIMEOUT)
+      ]);
+
+    const session =
+      resultado?.data?.session || null;
 
     if(session){
-      try{
+
+      /*
+        YA ESTÁ LOGUEADO.
+
+        No mostramos el formulario.
+      */
+
+      const cargado =
         await Promise.race([
           cargarSesion(session.user),
           timeout(TIMEOUT)
         ]);
-      }catch(error){
-        console.error('No se pudo cargar la sesión/perfil:', error);
-        await supabaseClient.auth.signOut().catch(()=>{});
-        currentUser=null;
-        currentProfile=null;
+
+      if(!cargado){
         mostrarLogin();
-        mostrarErrorLogin('La conexión con Supabase está tardando. Vuelve a intentar iniciar sesión.');
       }
+
     }else{
+
+      /*
+        No existe sesión.
+        Recién aquí mostramos login.
+      */
+
       mostrarLogin();
+
     }
+
   }catch(error){
-    console.error('Error al iniciar:', error);
-    mostrarLoading(false);
+
+    console.error(
+      'Error comprobando sesión:',
+      error
+    );
+
     mostrarLogin();
-    mostrarErrorLogin('No se pudo conectar con el sistema. Recarga la página e inténtalo nuevamente.');
+
+    mostrarErrorLogin(
+      'No se pudo comprobar la sesión. Recarga la página e inténtalo nuevamente.'
+    );
+
+  }finally{
+
+    mostrarLoading(false);
+
   }
 }
 
 
-/* =========================
-   CARGAR PERFILES
-   ========================= */
+/*
+  IMPORTANTE:
+  ejecutar inicialización al cargar la página.
+*/
 
-async function cargarPerfiles(){
-  perfiles={};
-
-  if(!currentProfile || currentProfile.role!=='admin'){
-    perfiles[currentUser.id]=currentProfile?.nombre || '';
-    return;
-  }
-
-  const {data,error}=await supabaseClient
-    .from('profiles')
-    .select('id,nombre,role');
-
-  if(error){
-    console.error(error);
-    return;
-  }
-
-  (data||[]).forEach(p=>perfiles[p.id]=p.nombre);
-}
-
+inicializar();
 /* =========================
    CARGAR REGISTROS ONLINE
    ========================= */
@@ -520,59 +750,347 @@ setupPhotoBox('despues','box-despues','file-despues');
 setupPhotoBox('pago','box-pago','file-pago');
 
 /* =========================
-   SELECTOR DE UBICACIÓN MANUAL
+   SELECTOR DE UBICACIÓN
+   SOLO ÁNCASH - PERÚ
    ========================= */
+
+/*
+  Centro aproximado de Áncash:
+  Huaraz
+
+  Límites aproximados del departamento:
+  Sur:    -10.70
+  Norte:   -8.00
+  Oeste:  -78.75
+  Este:   -76.50
+*/
+
+const ANCASH_BOUNDS = L.latLngBounds(
+  [-10.70, -78.75],
+  [-8.00, -76.50]
+);
+
+const ANCASH_CENTER = [-9.5278, -77.5278];
+
 function abrirMapa(){
-  const bg=document.getElementById('mapPickerBg');
-  if(!bg || typeof L==='undefined'){
-    alert('No se pudo cargar el mapa. Verifica tu conexión a Internet.');
+
+  const bg =
+    document.getElementById('mapPickerBg');
+
+  if(!bg || typeof L === 'undefined'){
+
+    alert(
+      'No se pudo cargar el mapa. Verifica tu conexión a Internet.'
+    );
+
     return;
   }
-  const lat=Number(document.getElementById('latitud')?.value);
-  const lng=Number(document.getElementById('longitud')?.value);
-  ubicacionTemporal={
-    lat:Number.isFinite(lat)?lat:-12.046374,
-    lng:Number.isFinite(lng)?lng:-77.042793
-  };
+
+  const latInput =
+    document.getElementById('latitud');
+
+  const lngInput =
+    document.getElementById('longitud');
+
+  const lat =
+    Number(latInput?.value);
+
+  const lng =
+    Number(lngInput?.value);
+
+  /*
+    Si ya hay una ubicación guardada y está
+    dentro de Áncash, usarla.
+  */
+
+  if(
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    ANCASH_BOUNDS.contains([lat,lng])
+  ){
+
+    ubicacionTemporal = {
+      lat,
+      lng
+    };
+
+  }else{
+
+    /*
+      Ubicación inicial: Huaraz / Áncash
+    */
+
+    ubicacionTemporal = {
+      lat: ANCASH_CENTER[0],
+      lng: ANCASH_CENTER[1]
+    };
+
+  }
+
   bg.classList.add('show');
-  setTimeout(()=>{
+
+  setTimeout(() => {
+
     if(!mapa){
-      mapa=L.map('locationMap').setView([ubicacionTemporal.lat,ubicacionTemporal.lng],13);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-        maxZoom:19,
-        attribution:'&copy; OpenStreetMap'
-      }).addTo(mapa);
-      mapa.on('click',e=>seleccionarPunto(e.latlng.lat,e.latlng.lng));
+
+      mapa = L.map(
+        'locationMap',
+        {
+          center: ANCASH_CENTER,
+          zoom: 9,
+
+          /*
+            NO permitir salir del área.
+          */
+          maxBounds: ANCASH_BOUNDS,
+          maxBoundsViscosity: 1.0,
+
+          minZoom: 8,
+          maxZoom: 18,
+
+          worldCopyJump: false
+        }
+      );
+
+      /*
+        Capa de mapa.
+        Esta alternativa suele cargar mejor
+        que la capa anterior en algunos celulares.
+      */
+
+      L.tileLayer(
+        'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        {
+          maxZoom: 19,
+
+          attribution:
+            '&copy; OpenStreetMap contributors',
+
+          crossOrigin: true
+        }
+      ).addTo(mapa);
+
+      /*
+        Al tocar el mapa:
+        comprobar que el punto esté dentro
+        de los límites de Áncash.
+      */
+
+      mapa.on('click', function(e){
+
+        const lat = e.latlng.lat;
+        const lng = e.latlng.lng;
+
+        if(
+          !ANCASH_BOUNDS.contains([lat,lng])
+        ){
+
+          alert(
+            '⚠️ Selecciona una ubicación dentro de Áncash, Perú.'
+          );
+
+          return;
+        }
+
+        seleccionarPunto(lat,lng);
+
+      });
+
     }else{
+
       mapa.invalidateSize();
-      mapa.setView([ubicacionTemporal.lat,ubicacionTemporal.lng],13);
+
+      mapa.setView(
+        [ubicacionTemporal.lat,ubicacionTemporal.lng],
+        9
+      );
+
     }
-    seleccionarPunto(ubicacionTemporal.lat,ubicacionTemporal.lng);
-  },100);
+
+    /*
+      Colocar marcador.
+    */
+
+    seleccionarPunto(
+      ubicacionTemporal.lat,
+      ubicacionTemporal.lng
+    );
+
+  },150);
 }
+
+
 function seleccionarPunto(lat,lng){
-  ubicacionTemporal={lat:Number(lat),lng:Number(lng)};
-  if(marcadorMapa) marcadorMapa.setLatLng([lat,lng]);
-  else if(mapa) marcadorMapa=L.marker([lat,lng]).addTo(mapa);
-  const el=document.getElementById('mapCoords');
-  if(el) el.textContent='Latitud: '+Number(lat).toFixed(6)+' · Longitud: '+Number(lng).toFixed(6);
+
+  lat = Number(lat);
+  lng = Number(lng);
+
+  /*
+    Nunca aceptar coordenadas fuera
+    de Áncash.
+  */
+
+  if(
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng)
+  ){
+    return;
+  }
+
+  if(
+    !ANCASH_BOUNDS.contains([lat,lng])
+  ){
+
+    alert(
+      '⚠️ La ubicación debe estar dentro de Áncash.'
+    );
+
+    return;
+  }
+
+  ubicacionTemporal = {
+    lat,
+    lng
+  };
+
+  if(marcadorMapa){
+
+    marcadorMapa.setLatLng([
+      lat,
+      lng
+    ]);
+
+  }else if(mapa){
+
+    marcadorMapa =
+      L.marker([lat,lng])
+        .addTo(mapa);
+
+  }
+
+  const el =
+    document.getElementById('mapCoords');
+
+  if(el){
+
+    el.textContent =
+      '📍 Áncash · Latitud: ' +
+      lat.toFixed(6) +
+      ' · Longitud: ' +
+      lng.toFixed(6);
+
+  }
 }
+
+
 function confirmarUbicacion(){
-  if(ubicacionTemporal.lat===null || ubicacionTemporal.lng===null){return;}
-  const lat=document.getElementById('latitud'),lng=document.getElementById('longitud');
-  if(lat) lat.value=ubicacionTemporal.lat.toFixed(6);
-  if(lng) lng.value=ubicacionTemporal.lng.toFixed(6);
+
+  if(
+    ubicacionTemporal.lat === null ||
+    ubicacionTemporal.lng === null
+  ){
+
+    alert(
+      'Selecciona una ubicación dentro de Áncash.'
+    );
+
+    return;
+  }
+
+  if(
+    !ANCASH_BOUNDS.contains([
+      ubicacionTemporal.lat,
+      ubicacionTemporal.lng
+    ])
+  ){
+
+    alert(
+      '⚠️ La ubicación debe estar dentro de Áncash.'
+    );
+
+    return;
+  }
+
+  const lat =
+    document.getElementById('latitud');
+
+  const lng =
+    document.getElementById('longitud');
+
+  if(lat){
+
+    lat.value =
+      ubicacionTemporal.lat.toFixed(6);
+
+  }
+
+  if(lng){
+
+    lng.value =
+      ubicacionTemporal.lng.toFixed(6);
+
+  }
+
   cerrarMapa();
 }
-function cerrarMapa(){document.getElementById('mapPickerBg')?.classList.remove('show');}
+
+
+function cerrarMapa(){
+
+  const bg =
+    document.getElementById('mapPickerBg');
+
+  if(bg){
+
+    bg.classList.remove('show');
+
+  }
+
+}
+
+
 function limpiarUbicacion(){
-  const lat=document.getElementById('latitud'),lng=document.getElementById('longitud');
+
+  const lat =
+    document.getElementById('latitud');
+
+  const lng =
+    document.getElementById('longitud');
+
   if(lat) lat.value='';
   if(lng) lng.value='';
-  ubicacionTemporal={lat:null,lng:null};
+
+  ubicacionTemporal={
+    lat:null,
+    lng:null
+  };
+
+  if(marcadorMapa && mapa){
+
+    mapa.removeLayer(marcadorMapa);
+    marcadorMapa=null;
+
+  }
+
+  const coords =
+    document.getElementById('mapCoords');
+
+  if(coords){
+
+    coords.textContent =
+      'Latitud: — · Longitud: —';
+
+  }
 }
+
+
 function obtenerUbicacionRegistro(r){
-  return {lat:r?.latitud??null,lng:r?.longitud??null};
+
+  return {
+    lat:r?.latitud ?? null,
+    lng:r?.longitud ?? null
+  };
+
 }
 
 /* =========================
@@ -637,9 +1155,23 @@ function limpiarCampos(){
   document.getElementById('dni').value='';
   document.getElementById('cliente').value='';
   document.getElementById('numero').value='';
-  document.getElementById('sino').value='';
+  document.getElementById('sino').value='Módulo 1';
   document.getElementById('dniMsg').innerHTML='';
   document.getElementById('numeroMsg').innerHTML='';
+
+   const lat =
+    document.getElementById('latitud');
+
+  const lng =
+    document.getElementById('longitud');
+
+  if(lat) lat.value='';
+  if(lng) lng.value='';
+
+  ubicacionTemporal={
+    lat:null,
+    lng:null
+  };
 
   fotos={qr:null,antes:null,despues:null,pago:null};
 
