@@ -191,10 +191,23 @@ supabaseClient.auth.onAuthStateChange(async (event,session)=>{
   }
 });
 
+function leerSesionLocalGuardada(){
+  try{
+    const raw = localStorage.getItem('bbva-sistema-auth');
+    if(!raw) return null;
+    const datos = JSON.parse(raw);
+    if(datos && datos.user) return datos;
+    if(datos && datos.currentSession && datos.currentSession.user) return datos.currentSession;
+    return null;
+  }catch(e){
+    return null;
+  }
+}
+
 async function inicializar(){
   // La pantalla de carga nunca debe bloquear el sistema.
   mostrarLoading(true);
-  const TIMEOUT = 7000;
+  const TIMEOUT = 15000;
   const timeout = ms => new Promise((_, reject) =>
     setTimeout(() => reject(new Error('TIMEOUT')), ms)
   );
@@ -229,8 +242,23 @@ async function inicializar(){
   }catch(error){
     console.error('Error al iniciar:', error);
     mostrarLoading(false);
-    mostrarLogin();
-    mostrarErrorLogin('No se pudo conectar con el sistema. Recarga la página e inténtalo nuevamente.');
+
+    // La conexión tardó demasiado: se intenta recuperar la sesión ya
+    // guardada en este dispositivo para no pedir la contraseña otra vez.
+    const sesionLocal = leerSesionLocalGuardada();
+    if(sesionLocal && sesionLocal.user){
+      try{
+        await cargarSesion(sesionLocal.user);
+      }catch(e){
+        console.error('No se pudo recargar los registros:', e);
+        currentUser = sesionLocal.user;
+        ocultarLogin();
+        mostrarErrorLogin('La conexión está lenta. Actualiza la página cuando mejore tu señal.');
+      }
+    }else{
+      mostrarLogin();
+      mostrarErrorLogin('No se pudo conectar con el sistema. Recarga la página e inténtalo nuevamente.');
+    }
   }
 }
 
@@ -970,6 +998,7 @@ function limpiarCampos(){
   rebuildPhotoBox('qr','box-qr');
   rebuildPhotoBox('antes','box-antes');
   rebuildPhotoBox('despues','box-despues');
+  rebuildPhotoBox('pago','box-pago');
 }
 
 /* =========================
