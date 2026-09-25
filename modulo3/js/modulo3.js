@@ -561,12 +561,31 @@ async function importarDatosExcel(silencioso=false){
       {nombre:'MODULO 4', archivo:'../import_excel/modulo_4_excel.json'}
     ];
 
-    const existentesDni=new Set(registros.map(r=>String(r.dni||'').trim()).filter(Boolean));
-    const existentesNumero=new Set(registros.map(r=>String(r.numero||'').trim()).filter(Boolean));
+    // Las restricciones únicas de DNI/número son globales en Supabase.
+    // Consultamos todos los módulos y la papelera para evitar que una fila
+    // duplicada detenga toda la importación.
+    const {data:existentesDB,error:errorExistentes}=await supabaseClient
+      .from('bbva_registros')
+      .select('dni,numero,sino,eliminado');
+
+    if(errorExistentes){
+      throw new Error('No se pudieron comprobar los registros existentes: '+errorExistentes.message);
+    }
+
+    const existentesDni=new Set(
+      (existentesDB||[])
+        .map(r=>String(r.dni||'').trim())
+        .filter(Boolean)
+    );
+    const existentesNumero=new Set(
+      (existentesDB||[])
+        .map(r=>String(r.numero||'').trim())
+        .filter(Boolean)
+    );
     const usadosDni=new Set();
     const usadosNumero=new Set();
     let maxCorrelativo=Math.max(0,...registros.map(r=>Number(r.correlativo)||0));
-    let importados=0, omitidos=0;
+    let importados=0, omitidos=0, errores=0;
 
     for(const fuente of archivos){
       const resp=await fetch(fuente.archivo,{cache:'no-store'});
@@ -619,12 +638,35 @@ async function importarDatosExcel(silencioso=false){
           .single();
 
         if(error){
-          throw new Error(`${fuente.nombre}, fila Excel ${r.fila_excel}: ${error.message}`);
+          if(qr_path || antes_path || despues_path || pago_path){
+            const rutas=[qr_path,antes_path,despues_path,pago_path].filter(Boolean);
+            if(rutas.length){
+              await supabaseClient.storage.from(BUCKET).remove(rutas);
+            }
+          }
+
+          const msg=String(error.message||'').toLowerCase();
+          const esDuplicado =
+            msg.includes('duplicate key') ||
+            msg.includes('unique constraint') ||
+            msg.includes('bbva_numero_unique') ||
+            msg.includes('bbva_dni_unique');
+
+          if(esDuplicado){
+            if(dni) existentesDni.add(dni);
+            if(numero) existentesNumero.add(numero);
+            omitidos++;
+            continue;
+          }
+
+          console.error(`${fuente.nombre}, fila Excel ${r.fila_excel}:`,error);
+          errores = (errores || 0) + 1;
+          continue;
         }
 
         registros.push(data);
-        if(dni) usadosDni.add(dni);
-        if(numero) usadosNumero.add(numero);
+        if(dni){ usadosDni.add(dni); existentesDni.add(dni); }
+        if(numero){ usadosNumero.add(numero); existentesNumero.add(numero); }
         importados++;
 
         if(btn) btn.textContent=`⏳ ${fuente.nombre} ${i+1}/${datos.length}`;
@@ -635,7 +677,7 @@ async function importarDatosExcel(silencioso=false){
     siguienteCorrelativo();
     renderLista();
 
-    if(!silencioso) alert(`Importación terminada.\n\nMODULO 3 + MODULO 4 → Módulo 3\n\nImportados: ${importados}\nOmitidos por duplicado: ${omitidos}`);
+    if(!silencioso) alert(`Importación terminada.\n\nMODULO 3 + MODULO 4 → Módulo 3\n\nImportados: ${importados}\nOmitidos por duplicado: ${omitidos}\nErrores no duplicados: ${errores}`);
   }catch(error){
     console.error('Importación MODULO 3 + MODULO 4:',error);
     alert('❌ No se pudo completar la importación.\n\n'+error.message);

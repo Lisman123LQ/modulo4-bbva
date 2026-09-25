@@ -36,4 +36,5 @@ ACTUALIZACION AUTOMATICA
 - Al iniciar sesión como ADMINISTRADOR, el sistema intenta importar automáticamente los JSON preparados en import_excel.
 - Los registros existentes se omiten por DNI y/o número, por lo que volver a iniciar sesión no crea duplicados.
 - El botón manual de importación sigue disponible para actualizar después de reemplazar los JSON/fotos por una nueva versión del Excel.
+- Si Supabase detecta un duplicado por una restricción UNIQUE, solo se omite esa fila; la importación no se detiene.
 - Módulo 3 admite también qr_archivo, antes_archivo, despues_archivo y pago_archivo cuando esas rutas existan en los JSON.

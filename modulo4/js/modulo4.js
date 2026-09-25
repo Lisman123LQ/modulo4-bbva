@@ -618,58 +618,183 @@ async function importarDatosExcel(silencioso=false){
     if(!resp.ok) throw new Error('No se encontró el archivo de datos BBVA.');
     const datos=await resp.json();
 
-    const existentesDni=new Set(registros.map(r=>String(r.dni||'').trim()).filter(Boolean));
-    const existentesNumero=new Set(registros.map(r=>String(r.numero||'').trim()).filter(Boolean));
+    /*
+      IMPORTANTE:
+      La restricción bbva_numero_unique / bbva_dni_unique es global en la
+      tabla. Por eso consultamos TODOS los módulos y también la papelera.
+      Así una fila duplicada del Excel se omite y la importación continúa.
+    */
+    const {data:existentesDB,error:errorExistentes}=await supabaseClient
+      .from('bbva_registros')
+      .select('dni,numero,sino,eliminado');
+
+    if(errorExistentes){
+      throw new Error('No se pudieron comprobar los registros existentes: '+errorExistentes.message);
+    }
+
+    const existentesDni=new Set(
+      (existentesDB||[])
+        .map(r=>String(r.dni||'').trim())
+        .filter(Boolean)
+    );
+
+    const existentesNumero=new Set(
+      (existentesDB||[])
+        .map(r=>String(r.numero||'').trim())
+        .filter(Boolean)
+    );
+
+    /* Evita duplicados dentro del propio Excel. */
     const usadosDni=new Set();
     const usadosNumero=new Set();
-    let maxCorrelativo=Math.max(0,...registros.map(r=>Number(r.correlativo)||0));
-    let importados=0, omitidos=0, sinFoto=0;
+
+    let maxCorrelativo=Math.max(
+      0,
+      ...((existentesDB||[]).length
+        ? registros.map(r=>Number(r.correlativo)||0)
+        : registros.map(r=>Number(r.correlativo)||0))
+    );
+
+    /*
+      Buscamos el correlativo real directamente en Supabase para no reutilizar
+      números si existen registros en papelera.
+    */
+    const {data:maxData,error:errorMax}=await supabaseClient
+      .from('bbva_registros')
+      .select('correlativo')
+      .eq('sino','Módulo 4')
+      .order('correlativo',{ascending:false})
+      .limit(1);
+
+    if(!errorMax && maxData && maxData.length){
+      maxCorrelativo=Math.max(
+        maxCorrelativo,
+        Number(maxData[0].correlativo)||0
+      );
+    }
+
+    let importados=0, omitidos=0, sinFoto=0, errores=0;
 
     for(let i=0;i<datos.length;i++){
       const r=datos[i];
       const dni=String(r.dni||'').trim();
       const numero=String(r.numero||'').trim();
-      if((dni && (existentesDni.has(dni)||usadosDni.has(dni))) || (numero && (existentesNumero.has(numero)||usadosNumero.has(numero)))){
-        omitidos++; continue;
+
+      if(
+        (dni && (existentesDni.has(dni)||usadosDni.has(dni))) ||
+        (numero && (existentesNumero.has(numero)||usadosNumero.has(numero)))
+      ){
+        omitidos++;
+        continue;
       }
 
       let qr_path=null;
+
       if(r.qr_archivo){
         const fr=await fetch('../'+r.qr_archivo,{cache:'no-store'});
         if(fr.ok){
           qr_path=await subirFoto(await fr.blob(),'qr');
-        }else{ sinFoto++; }
-      }else{ sinFoto++; }
+        }else{
+          sinFoto++;
+        }
+      }else{
+        sinFoto++;
+      }
 
       maxCorrelativo++;
-      const {data,error}=await supabaseClient.from('bbva_registros').insert({
-        user_id:currentUser.id, correlativo:maxCorrelativo, dni:dni||null,
-        cliente:r.cliente||null, numero:numero||null, latitud:null, longitud:null,
-        qr_path, antes_path:null, despues_path:null, pago_path:null,
-        sino:'Módulo 4', eliminado:false
-      }).select().single();
+
+      const {data,error}=await supabaseClient
+        .from('bbva_registros')
+        .insert({
+          user_id:currentUser.id,
+          correlativo:maxCorrelativo,
+          dni:dni||null,
+          cliente:r.cliente||null,
+          numero:numero||null,
+          latitud:null,
+          longitud:null,
+          qr_path,
+          antes_path:null,
+          despues_path:null,
+          pago_path:null,
+          sino:'Módulo 4',
+          eliminado:false
+        })
+        .select()
+        .single();
 
       if(error){
-        if(qr_path) await supabaseClient.storage.from(BUCKET).remove([qr_path]);
-        throw new Error('Fila Excel '+r.fila_excel+': '+error.message);
+        if(qr_path){
+          await supabaseClient.storage.from(BUCKET).remove([qr_path]);
+        }
+
+        /*
+          Si otro registro ya tiene el mismo número/DNI, NO detenemos toda
+          la importación. Se omite únicamente esta fila y se continúa.
+        */
+        const msg=String(error.message||'').toLowerCase();
+        const esDuplicado =
+          msg.includes('duplicate key') ||
+          msg.includes('unique constraint') ||
+          msg.includes('bbva_numero_unique') ||
+          msg.includes('bbva_dni_unique');
+
+        if(esDuplicado){
+          if(numero) existentesNumero.add(numero);
+          if(dni) existentesDni.add(dni);
+          omitidos++;
+          continue;
+        }
+
+        errores++;
+        console.error('Error importando fila Excel '+r.fila_excel+':',error);
+        continue;
       }
 
       registros.push(data);
-      if(dni) usadosDni.add(dni);
-      if(numero) usadosNumero.add(numero);
+
+      if(dni){
+        usadosDni.add(dni);
+        existentesDni.add(dni);
+      }
+
+      if(numero){
+        usadosNumero.add(numero);
+        existentesNumero.add(numero);
+      }
+
       importados++;
-      if(btn) btn.textContent=`⏳ BBVA ${i+1}/${datos.length}`;
+
+      if(btn){
+        btn.textContent=`⏳ BBVA ${i+1}/${datos.length}`;
+      }
     }
 
     await prepararUrlsFotos();
     siguienteCorrelativo();
     renderLista();
-    if(!silencioso) alert(`Importación BBVA terminada.\n\nImportados: ${importados}\nOmitidos por duplicado: ${omitidos}\nSin foto QR: ${sinFoto}`);
+
+    const mensaje=
+      `Importación BBVA terminada.\n\n`+
+      `Importados: ${importados}\n`+
+      `Omitidos por duplicado: ${omitidos}\n`+
+      `Sin foto QR: ${sinFoto}`+
+      (errores ? `\nErrores no duplicados: ${errores}` : '');
+
+    if(!silencioso){
+      alert('✅ '+mensaje);
+    }else{
+      console.log('Importación BBVA automática:',mensaje);
+    }
+
   }catch(error){
     console.error('Importación BBVA:',error);
     alert('❌ No se pudo completar la importación.\n\n'+error.message);
   }finally{
-    if(btn){btn.disabled=false;btn.textContent='📥 Cargar datos BBVA del Excel';}
+    if(btn){
+      btn.disabled=false;
+      btn.textContent='📥 Cargar datos BBVA del Excel';
+    }
   }
 }
 
@@ -1950,95 +2075,6 @@ async function subirFoto(
    Importa registros y sus fotos desde import_excel/bbva.json.
    Los DNI, números o QR que ya existan se omiten.
    ========================================================= */
-async function importarDatosExcel(silencioso=false){
-  if(!currentProfile || currentProfile.role!=='admin'){
-    if(!silencioso) alert('Solo el administrador puede importar los datos del Excel.');
-    return;
-  }
-
-  if(!silencioso && !confirm('Se cargarán los datos de la hoja BBVA en Módulo 4.\n\nLos registros que ya existan se omitirán.\nTambién se cargarán las fotos disponibles.\n\n¿Continuar?')) return;
-
-  const btn=document.getElementById('btnImportarExcel');
-  if(btn){btn.disabled=true;btn.textContent='⏳ Importando BBVA...';}
-
-  try{
-    const resp=await fetch('../import_excel/bbva.json',{cache:'no-store'});
-    if(!resp.ok) throw new Error('No se encontró import_excel/bbva.json.');
-    const datos=await resp.json();
-
-    // Los registros ya están cargados desde Supabase para ADMIN, pero usamos
-    // también conjuntos locales para evitar duplicados dentro del mismo Excel.
-    const existentesDni=new Set(registros.map(r=>String(r.dni||'').trim()).filter(Boolean));
-    const existentesNumero=new Set(registros.map(r=>String(r.numero||'').trim()).filter(Boolean));
-    const existentesQr=new Set(registros.map(r=>String(r.qr_path||'').trim()).filter(Boolean));
-    const usadosDni=new Set(), usadosNumero=new Set();
-    let maxCorrelativo=Math.max(0,...registros.map(r=>Number(r.correlativo)||0));
-    let importados=0, omitidos=0, sinFoto=0;
-
-    for(let i=0;i<datos.length;i++){
-      const r=datos[i]||{};
-      const dni=String(r.dni||'').trim();
-      const numero=String(r.numero||'').trim();
-
-      if((dni && (existentesDni.has(dni)||usadosDni.has(dni))) ||
-         (numero && (existentesNumero.has(numero)||usadosNumero.has(numero)))){
-        omitidos++; continue;
-      }
-
-      let qr_path=null;
-      if(r.qr_archivo){
-        const fr=await fetch('../'+r.qr_archivo,{cache:'no-store'});
-        if(fr.ok){
-          qr_path=await subirFoto(await fr.blob(),'qr');
-        }else{
-          sinFoto++;
-        }
-      }else{
-        sinFoto++;
-      }
-
-      maxCorrelativo++;
-      const {data,error}=await supabaseClient.from('bbva_registros').insert({
-        user_id:currentUser.id,
-        correlativo:maxCorrelativo,
-        dni:dni||null,
-        cliente:r.cliente||null,
-        numero:numero||null,
-        latitud:null,
-        longitud:null,
-        qr_path,
-        antes_path:null,
-        despues_path:null,
-        pago_path:null,
-        sino:'Módulo 4',
-        eliminado:false
-      }).select().single();
-
-      if(error){
-        if(qr_path) await supabaseClient.storage.from(BUCKET).remove([qr_path]);
-        throw new Error(`BBVA, fila Excel ${r.fila_excel}: ${error.message}`);
-      }
-
-      registros.push(data);
-      if(dni) usadosDni.add(dni);
-      if(numero) usadosNumero.add(numero);
-      importados++;
-      if(btn) btn.textContent=`⏳ BBVA ${i+1}/${datos.length}`;
-    }
-
-    await prepararUrlsFotos();
-    siguienteCorrelativo();
-    renderLista();
-
-    alert(`Importación BBVA terminada.\n\nImportados: ${importados}\nOmitidos por duplicado/vacíos: ${omitidos}\nSin foto QR: ${sinFoto}`);
-  }catch(error){
-    console.error('Importación BBVA:',error);
-    alert('❌ No se pudo completar la importación BBVA.\n\n'+error.message);
-  }finally{
-    if(btn){btn.disabled=false;btn.textContent='📥 Cargar BBVA del Excel';}
-  }
-}
-
 /* =========================
    GUARDAR REGISTRO
    ========================= */

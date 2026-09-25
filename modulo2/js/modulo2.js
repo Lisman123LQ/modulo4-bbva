@@ -314,10 +314,24 @@ async function importarDatosExcel(silencioso=false){
     if(!resp.ok) throw new Error('No se encontró el archivo de datos PLIN_GN.');
     const datos=await resp.json();
 
-    const existentesNumero=new Set(registros.map(r=>String(r.numero||'').trim()).filter(Boolean));
+    // La restricción bbva_numero_unique es global en Supabase.
+    // Consultamos todos los módulos y la papelera para no detener la importación.
+    const {data:existentesDB,error:errorExistentes}=await supabaseClient
+      .from('bbva_registros')
+      .select('numero,sino,eliminado');
+
+    if(errorExistentes){
+      throw new Error('No se pudieron comprobar los números existentes: '+errorExistentes.message);
+    }
+
+    const existentesNumero=new Set(
+      (existentesDB||[])
+        .map(r=>String(r.numero||'').trim())
+        .filter(Boolean)
+    );
     const usadosNumero=new Set();
     let maxCorrelativo=Math.max(0,...registros.map(r=>Number(r.correlativo)||0));
-    let importados=0, omitidos=0, sinFoto=0;
+    let importados=0, omitidos=0, sinFoto=0, errores=0;
 
     for(let i=0;i<datos.length;i++){
       const r=datos[i];
@@ -344,11 +358,27 @@ async function importarDatosExcel(silencioso=false){
 
       if(error){
         if(qr_path) await supabaseClient.storage.from(BUCKET).remove([qr_path]);
-        throw new Error('Fila Excel '+r.fila_excel+': '+error.message);
+
+        const msg=String(error.message||'').toLowerCase();
+        const esDuplicado =
+          msg.includes('duplicate key') ||
+          msg.includes('unique constraint') ||
+          msg.includes('bbva_numero_unique');
+
+        if(esDuplicado){
+          existentesNumero.add(numero);
+          omitidos++;
+          continue;
+        }
+
+        console.error('Error importando fila Excel '+r.fila_excel+':',error);
+        errores++;
+        continue;
       }
 
       registros.push(data);
       usadosNumero.add(numero);
+      existentesNumero.add(numero);
       importados++;
       if(btn) btn.textContent=`⏳ PLIN ${i+1}/${datos.length}`;
     }
