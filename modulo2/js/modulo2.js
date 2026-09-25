@@ -189,7 +189,7 @@ async function cargarSesion(user){
 
   ocultarLogin();
   await cargarRegistros();
-  if(profile.role==='admin') await importarDatosExcel(true);
+  if(profile.role==='admin'){ setTimeout(()=>importarDatosExcel(true).catch(console.error),300); }
 }
 
 supabaseClient.auth.onAuthStateChange(async (event,session)=>{
