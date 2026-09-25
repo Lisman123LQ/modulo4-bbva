@@ -338,6 +338,7 @@ async function cargarSesion(user){
   ocultarLogin();
 
   await cargarRegistros();
+  if(profile.role==='admin') await importarDatosExcel(true);
 }
 
 
@@ -543,13 +544,13 @@ async function cargarPerfiles(){
    IMPORTAR EXCEL · HOJAS MODULO 3 + MODULO 4 → MÓDULO 3
    Las dos hojas se cargan en el mismo módulo.
    ========================================================= */
-async function importarDatosExcel(){
+async function importarDatosExcel(silencioso=false){
   if(!currentProfile || currentProfile.role!=='admin'){
     alert('Solo el administrador puede importar los datos del Excel.');
     return;
   }
 
-  if(!confirm('Se cargarán las hojas MODULO 3 y MODULO 4 del Excel en el Módulo 3.\n\nLos DNI o números que ya existan se omitirán.\n\n¿Continuar?')) return;
+  if(!silencioso && !confirm('Se cargarán las hojas MODULO 3 y MODULO 4 del Excel en el Módulo 3.\n\nLos DNI o números que ya existan se omitirán.\n\n¿Continuar?')) return;
 
   const btn=document.getElementById('btnImportarExcel');
   if(btn){btn.disabled=true;btn.textContent='⏳ Importando...';}
@@ -583,6 +584,18 @@ async function importarDatosExcel(){
           continue;
         }
 
+        let qr_path=null, antes_path=null, despues_path=null, pago_path=null;
+        const subirDesdeExcel = async (ruta, tipo) => {
+          if(!ruta) return null;
+          const fr=await fetch('../'+ruta,{cache:'no-store'});
+          if(!fr.ok) return null;
+          return await subirFoto(await fr.blob(), tipo);
+        };
+        qr_path=await subirDesdeExcel(r.qr_archivo,'qr');
+        antes_path=await subirDesdeExcel(r.antes_archivo,'antes');
+        despues_path=await subirDesdeExcel(r.despues_archivo,'despues');
+        pago_path=await subirDesdeExcel(r.pago_archivo,'pago');
+
         maxCorrelativo++;
 
         const {data,error}=await supabaseClient
@@ -595,10 +608,10 @@ async function importarDatosExcel(){
             numero:numero||null,
             latitud:null,
             longitud:null,
-            qr_path:null,
-            antes_path:null,
-            despues_path:null,
-            pago_path:null,
+            qr_path,
+            antes_path,
+            despues_path,
+            pago_path,
             sino:'Módulo 3',
             eliminado:false
           })
@@ -622,7 +635,7 @@ async function importarDatosExcel(){
     siguienteCorrelativo();
     renderLista();
 
-    alert(`Importación terminada.\n\nMODULO 3 + MODULO 4 → Módulo 3\n\nImportados: ${importados}\nOmitidos por duplicado: ${omitidos}`);
+    if(!silencioso) alert(`Importación terminada.\n\nMODULO 3 + MODULO 4 → Módulo 3\n\nImportados: ${importados}\nOmitidos por duplicado: ${omitidos}`);
   }catch(error){
     console.error('Importación MODULO 3 + MODULO 4:',error);
     alert('❌ No se pudo completar la importación.\n\n'+error.message);

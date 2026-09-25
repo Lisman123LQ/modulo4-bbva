@@ -599,13 +599,13 @@ async function cargarPerfiles() {
    IMPORTAR DATOS DEL EXCEL · HOJA BBVA → MÓDULO 4
    Solo administrador. Los duplicados por DNI o número se omiten.
    ========================================================= */
-async function importarDatosExcel(){
+async function importarDatosExcel(silencioso=false){
   if(!currentProfile || currentProfile.role!=='admin'){
     alert('Solo el administrador puede importar los datos del Excel.');
     return;
   }
 
-  if(!confirm('Se cargarán los datos de la hoja BBVA del Excel en Módulo 4.\n\nLos DNI o números que ya existan se omitirán.\n\n¿Continuar?')) return;
+  if(!silencioso && !confirm('Se cargarán los datos de la hoja BBVA del Excel en Módulo 4.\n\nLos DNI o números que ya existan se omitirán.\n\n¿Continuar?')) return;
 
   const btn=document.getElementById('btnImportarExcel');
   if(btn){btn.disabled=true;btn.textContent='⏳ Importando BBVA...';}
@@ -661,7 +661,7 @@ async function importarDatosExcel(){
     await prepararUrlsFotos();
     siguienteCorrelativo();
     renderLista();
-    alert(`Importación BBVA terminada.\n\nImportados: ${importados}\nOmitidos por duplicado: ${omitidos}\nSin foto QR: ${sinFoto}`);
+    if(!silencioso) alert(`Importación BBVA terminada.\n\nImportados: ${importados}\nOmitidos por duplicado: ${omitidos}\nSin foto QR: ${sinFoto}`);
   }catch(error){
     console.error('Importación BBVA:',error);
     alert('❌ No se pudo completar la importación.\n\n'+error.message);

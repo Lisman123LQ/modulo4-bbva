@@ -189,6 +189,7 @@ async function cargarSesion(user){
 
   ocultarLogin();
   await cargarRegistros();
+  if(profile.role==='admin') await importarDatosExcel(true);
 }
 
 supabaseClient.auth.onAuthStateChange(async (event,session)=>{
@@ -297,13 +298,13 @@ async function cargarPerfiles(){
    IMPORTAR DATOS DEL EXCEL · HOJA PLIN_GN → MÓDULO 2
    Solo administrador. Los números que ya existan se omiten.
    ========================================================= */
-async function importarDatosExcel(){
+async function importarDatosExcel(silencioso=false){
   if(!currentProfile || currentProfile.role!=='admin'){
     alert('Solo el administrador puede importar los datos del Excel.');
     return;
   }
 
-  if(!confirm('Se cargarán los datos de la hoja PLIN_GN del Excel en Módulo 2.\n\nLos números que ya existan se omitirán.\n\n¿Continuar?')) return;
+  if(!silencioso && !confirm('Se cargarán los datos de la hoja PLIN_GN del Excel en Módulo 2.\n\nLos números que ya existan se omitirán.\n\n¿Continuar?')) return;
 
   const btn=document.getElementById('btnImportarExcel');
   if(btn){btn.disabled=true;btn.textContent='⏳ Importando PLIN...';}
