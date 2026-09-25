@@ -363,6 +363,11 @@ async function cargarSesion(user) {
 
   currentProfile = profile;
 
+  const btnImportarExcel = document.getElementById('btnImportarExcel');
+  if (btnImportarExcel) {
+    btnImportarExcel.style.display = profile.role === 'admin' ? 'block' : 'none';
+  }
+
   const userName =
     document.getElementById('userName');
 
@@ -589,6 +594,81 @@ async function cargarPerfiles() {
   });
 }
 
+
+/* =========================================================
+   IMPORTAR DATOS DEL EXCEL · HOJA BBVA → MÓDULO 4
+   Solo administrador. Los duplicados por DNI o número se omiten.
+   ========================================================= */
+async function importarDatosExcel(){
+  if(!currentProfile || currentProfile.role!=='admin'){
+    alert('Solo el administrador puede importar los datos del Excel.');
+    return;
+  }
+
+  if(!confirm('Se cargarán los datos de la hoja BBVA del Excel en Módulo 4.\n\nLos DNI o números que ya existan se omitirán.\n\n¿Continuar?')) return;
+
+  const btn=document.getElementById('btnImportarExcel');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Importando BBVA...';}
+
+  try{
+    const resp=await fetch('../import_excel/bbva.json',{cache:'no-store'});
+    if(!resp.ok) throw new Error('No se encontró el archivo de datos BBVA.');
+    const datos=await resp.json();
+
+    const existentesDni=new Set(registros.map(r=>String(r.dni||'').trim()).filter(Boolean));
+    const existentesNumero=new Set(registros.map(r=>String(r.numero||'').trim()).filter(Boolean));
+    const usadosDni=new Set();
+    const usadosNumero=new Set();
+    let maxCorrelativo=Math.max(0,...registros.map(r=>Number(r.correlativo)||0));
+    let importados=0, omitidos=0, sinFoto=0;
+
+    for(let i=0;i<datos.length;i++){
+      const r=datos[i];
+      const dni=String(r.dni||'').trim();
+      const numero=String(r.numero||'').trim();
+      if((dni && (existentesDni.has(dni)||usadosDni.has(dni))) || (numero && (existentesNumero.has(numero)||usadosNumero.has(numero)))){
+        omitidos++; continue;
+      }
+
+      let qr_path=null;
+      if(r.qr_archivo){
+        const fr=await fetch('../'+r.qr_archivo,{cache:'no-store'});
+        if(fr.ok){
+          qr_path=await subirFoto(await fr.blob(),'qr');
+        }else{ sinFoto++; }
+      }else{ sinFoto++; }
+
+      maxCorrelativo++;
+      const {data,error}=await supabaseClient.from('bbva_registros').insert({
+        user_id:currentUser.id, correlativo:maxCorrelativo, dni:dni||null,
+        cliente:r.cliente||null, numero:numero||null, latitud:null, longitud:null,
+        qr_path, antes_path:null, despues_path:null, pago_path:null,
+        sino:'Módulo 4', eliminado:false
+      }).select().single();
+
+      if(error){
+        if(qr_path) await supabaseClient.storage.from(BUCKET).remove([qr_path]);
+        throw new Error('Fila Excel '+r.fila_excel+': '+error.message);
+      }
+
+      registros.push(data);
+      if(dni) usadosDni.add(dni);
+      if(numero) usadosNumero.add(numero);
+      importados++;
+      if(btn) btn.textContent=`⏳ BBVA ${i+1}/${datos.length}`;
+    }
+
+    await prepararUrlsFotos();
+    siguienteCorrelativo();
+    renderLista();
+    alert(`Importación BBVA terminada.\n\nImportados: ${importados}\nOmitidos por duplicado: ${omitidos}\nSin foto QR: ${sinFoto}`);
+  }catch(error){
+    console.error('Importación BBVA:',error);
+    alert('❌ No se pudo completar la importación.\n\n'+error.message);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='📥 Cargar datos BBVA del Excel';}
+  }
+}
 
 /* =========================
    CARGAR REGISTROS ONLINE

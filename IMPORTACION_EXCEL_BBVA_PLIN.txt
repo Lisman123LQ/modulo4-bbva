@@ -1,0 +1,32 @@
+INTEGRACION DEL EXCEL DATOS QR PLIN(1).xlsm
+
+Se incorporaron los datos de:
+- Hoja BBVA -> Modulo 4
+- Hoja PLIN_GN -> Modulo 2
+
+Datos preparados:
+- BBVA: 77 registros; 75 fotos QR disponibles.
+- PLIN_GN: 134 registros; 134 fotos QR disponibles (se usa la primera imagen de cada fila).
+
+COMO USARLO
+1. Publica estos archivos en GitHub Pages.
+2. Ingresa al sistema con una cuenta cuyo perfil tenga role = admin.
+3. En Modulo 4 aparecera "Cargar datos BBVA del Excel".
+4. En Modulo 2 aparecera "Cargar datos PLIN_GN del Excel".
+5. Pulsa el boton correspondiente y confirma.
+6. Los registros que ya existan por DNI/numero no se vuelven a importar.
+7. Las fotos se suben al bucket bbva-fotos y quedan vinculadas al registro.
+
+IMPORTANTE
+- Las macros VBA del .xlsm no se ejecutan en GitHub Pages.
+- La integracion convierte los datos a registros web de Supabase.
+- En la hoja BBVA tambien existen las columnas SI/NO, LUGAR, COMENTARIO y CORREGIDO. Se conservan en import_excel/bbva.json como referencia, pero no se guardan en bbva_registros porque el esquema actual del sistema no tiene esos campos.
+- En PLIN_GN no se asigna DNI porque esa hoja no contiene DNI.
+
+
+DISTRIBUCION ACTUALIZADA
+- BBVA -> Modulo 4 (incluye fotos import_excel/bbva/fila-N.jpg)
+- PLIN_GN -> Modulo 2 (incluye fotos import_excel/plin_gn/fila-N.jpg)
+- MODULO 3 + MODULO 4 -> Modulo 3
+- Las fotos disponibles se suben automaticamente a Supabase Storage al ejecutar la importacion.
+- BBVA filas 9 y 42 no tienen foto disponible en el ZIP.

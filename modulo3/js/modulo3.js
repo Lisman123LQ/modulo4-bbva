@@ -314,6 +314,11 @@ async function cargarSesion(user){
 
   currentProfile=profile;
 
+  const btnImportarExcel = document.getElementById('btnImportarExcel');
+  if(btnImportarExcel){
+    btnImportarExcel.style.display = profile.role === 'admin' ? 'block' : 'none';
+  }
+
 
   const userName =
     document.getElementById('userName');
@@ -533,6 +538,101 @@ async function cargarPerfiles(){
   );
 }
 
+
+/* =========================================================
+   IMPORTAR EXCEL · HOJAS MODULO 3 + MODULO 4 → MÓDULO 3
+   Las dos hojas se cargan en el mismo módulo.
+   ========================================================= */
+async function importarDatosExcel(){
+  if(!currentProfile || currentProfile.role!=='admin'){
+    alert('Solo el administrador puede importar los datos del Excel.');
+    return;
+  }
+
+  if(!confirm('Se cargarán las hojas MODULO 3 y MODULO 4 del Excel en el Módulo 3.\n\nLos DNI o números que ya existan se omitirán.\n\n¿Continuar?')) return;
+
+  const btn=document.getElementById('btnImportarExcel');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Importando...';}
+
+  try{
+    const archivos=[
+      {nombre:'MODULO 3', archivo:'../import_excel/modulo_3_excel.json'},
+      {nombre:'MODULO 4', archivo:'../import_excel/modulo_4_excel.json'}
+    ];
+
+    const existentesDni=new Set(registros.map(r=>String(r.dni||'').trim()).filter(Boolean));
+    const existentesNumero=new Set(registros.map(r=>String(r.numero||'').trim()).filter(Boolean));
+    const usadosDni=new Set();
+    const usadosNumero=new Set();
+    let maxCorrelativo=Math.max(0,...registros.map(r=>Number(r.correlativo)||0));
+    let importados=0, omitidos=0;
+
+    for(const fuente of archivos){
+      const resp=await fetch(fuente.archivo,{cache:'no-store'});
+      if(!resp.ok) throw new Error(`No se encontró el archivo de ${fuente.nombre}.`);
+      const datos=await resp.json();
+
+      for(let i=0;i<datos.length;i++){
+        const r=datos[i];
+        const dni=String(r.dni||'').trim();
+        const numero=String(r.numero||'').trim();
+
+        if((dni && (existentesDni.has(dni)||usadosDni.has(dni))) ||
+           (numero && (existentesNumero.has(numero)||usadosNumero.has(numero)))){
+          omitidos++;
+          continue;
+        }
+
+        maxCorrelativo++;
+
+        const {data,error}=await supabaseClient
+          .from('bbva_registros')
+          .insert({
+            user_id:currentUser.id,
+            correlativo:maxCorrelativo,
+            dni:dni||null,
+            cliente:r.cliente||null,
+            numero:numero||null,
+            latitud:null,
+            longitud:null,
+            qr_path:null,
+            antes_path:null,
+            despues_path:null,
+            pago_path:null,
+            sino:'Módulo 3',
+            eliminado:false
+          })
+          .select()
+          .single();
+
+        if(error){
+          throw new Error(`${fuente.nombre}, fila Excel ${r.fila_excel}: ${error.message}`);
+        }
+
+        registros.push(data);
+        if(dni) usadosDni.add(dni);
+        if(numero) usadosNumero.add(numero);
+        importados++;
+
+        if(btn) btn.textContent=`⏳ ${fuente.nombre} ${i+1}/${datos.length}`;
+      }
+    }
+
+    await prepararUrlsFotos();
+    siguienteCorrelativo();
+    renderLista();
+
+    alert(`Importación terminada.\n\nMODULO 3 + MODULO 4 → Módulo 3\n\nImportados: ${importados}\nOmitidos por duplicado: ${omitidos}`);
+  }catch(error){
+    console.error('Importación MODULO 3 + MODULO 4:',error);
+    alert('❌ No se pudo completar la importación.\n\n'+error.message);
+  }finally{
+    if(btn){
+      btn.disabled=false;
+      btn.textContent='📥 Cargar MODULO 3 + MODULO 4 del Excel';
+    }
+  }
+}
 
 /* =========================
    CARGAR REGISTROS ONLINE

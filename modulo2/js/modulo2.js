@@ -178,6 +178,12 @@ async function cargarSesion(user){
   }
 
   currentProfile=profile;
+
+  const btnImportarExcel = document.getElementById('btnImportarExcel');
+  if (btnImportarExcel) {
+    btnImportarExcel.style.display = profile.role === 'admin' ? 'block' : 'none';
+  }
+
   document.getElementById('userName').textContent =
     profile.nombre + (profile.role==='admin' ? ' · ADMIN' : '');
 
@@ -285,6 +291,77 @@ async function cargarPerfiles(){
   }
 
   (data||[]).forEach(p=>perfiles[p.id]=p.nombre);
+}
+
+/* =========================================================
+   IMPORTAR DATOS DEL EXCEL · HOJA PLIN_GN → MÓDULO 2
+   Solo administrador. Los números que ya existan se omiten.
+   ========================================================= */
+async function importarDatosExcel(){
+  if(!currentProfile || currentProfile.role!=='admin'){
+    alert('Solo el administrador puede importar los datos del Excel.');
+    return;
+  }
+
+  if(!confirm('Se cargarán los datos de la hoja PLIN_GN del Excel en Módulo 2.\n\nLos números que ya existan se omitirán.\n\n¿Continuar?')) return;
+
+  const btn=document.getElementById('btnImportarExcel');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Importando PLIN...';}
+
+  try{
+    const resp=await fetch('../import_excel/plin_gn.json',{cache:'no-store'});
+    if(!resp.ok) throw new Error('No se encontró el archivo de datos PLIN_GN.');
+    const datos=await resp.json();
+
+    const existentesNumero=new Set(registros.map(r=>String(r.numero||'').trim()).filter(Boolean));
+    const usadosNumero=new Set();
+    let maxCorrelativo=Math.max(0,...registros.map(r=>Number(r.correlativo)||0));
+    let importados=0, omitidos=0, sinFoto=0;
+
+    for(let i=0;i<datos.length;i++){
+      const r=datos[i];
+      const numero=String(r.numero||'').trim();
+      if(!numero || existentesNumero.has(numero) || usadosNumero.has(numero)){
+        omitidos++; continue;
+      }
+
+      let qr_path=null;
+      if(r.qr_archivo){
+        const fr=await fetch('../'+r.qr_archivo,{cache:'no-store'});
+        if(fr.ok){
+          qr_path=await subirFoto(await fr.blob(),'qr');
+        }else{ sinFoto++; }
+      }else{ sinFoto++; }
+
+      maxCorrelativo++;
+      const {data,error}=await supabaseClient.from('bbva_registros').insert({
+        user_id:currentUser.id, correlativo:maxCorrelativo, dni:null,
+        cliente:r.cliente||null, numero, latitud:null, longitud:null,
+        qr_path, antes_path:null, despues_path:null, pago_path:null,
+        sino:'Módulo 2', eliminado:false
+      }).select().single();
+
+      if(error){
+        if(qr_path) await supabaseClient.storage.from(BUCKET).remove([qr_path]);
+        throw new Error('Fila Excel '+r.fila_excel+': '+error.message);
+      }
+
+      registros.push(data);
+      usadosNumero.add(numero);
+      importados++;
+      if(btn) btn.textContent=`⏳ PLIN ${i+1}/${datos.length}`;
+    }
+
+    await prepararUrlsFotos();
+    siguienteCorrelativo();
+    renderLista();
+    alert(`Importación PLIN_GN terminada.\n\nImportados: ${importados}\nOmitidos por duplicado/vacíos: ${omitidos}\nSin foto QR: ${sinFoto}`);
+  }catch(error){
+    console.error('Importación PLIN_GN:',error);
+    alert('❌ No se pudo completar la importación.\n\n'+error.message);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='📥 Cargar datos PLIN_GN del Excel';}
+  }
 }
 
 /* =========================
