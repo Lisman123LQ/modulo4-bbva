@@ -603,10 +603,22 @@ async function cargarPerfiles() {
    Solo administrador. Los duplicados por DNI o número se omiten.
    ========================================================= */
 async function importarDatosExcel(silencioso=false){
+  /*
+    BLOQUEO: evita que la importación automática y el botón ejecuten
+    dos importaciones al mismo tiempo. Si dos procesos insertan la misma
+    fila simultáneamente, Supabase puede devolver bbva_numero_unique.
+  */
+  if(window.__bbvaImportacionEnCurso){
+    console.warn('Importación BBVA ya está en curso. Se ignora esta ejecución.');
+    return;
+  }
+
   if(!currentProfile || currentProfile.role!=='admin'){
     alert('Solo el administrador puede importar los datos del Excel.');
     return;
   }
+
+  window.__bbvaImportacionEnCurso=true;
 
   if(!silencioso && !confirm('Se cargarán los datos de la hoja BBVA del Excel en Módulo 4.\n\nLos DNI o números que ya existan se omitirán.\n\n¿Continuar?')) return;
 
@@ -677,8 +689,8 @@ async function importarDatosExcel(silencioso=false){
 
     for(let i=0;i<datos.length;i++){
       const r=datos[i];
-      const dni=String(r.dni||'').trim();
-      const numero=String(r.numero||'').trim();
+      const dni=String(r.dni||'').replace(/\D/g,'').trim();
+      const numero=String(r.numero||'').replace(/\D/g,'').trim();
 
       if(
         (dni && (existentesDni.has(dni)||usadosDni.has(dni))) ||
@@ -791,6 +803,7 @@ async function importarDatosExcel(silencioso=false){
     console.error('Importación BBVA:',error);
     alert('❌ No se pudo completar la importación.\n\n'+error.message);
   }finally{
+    window.__bbvaImportacionEnCurso=false;
     if(btn){
       btn.disabled=false;
       btn.textContent='📥 Cargar datos BBVA del Excel';
